@@ -2,7 +2,7 @@
 # Everyone's installed app picks up new versions automatically.
 #
 # Needs two repository secrets (Settings > Secrets and variables > Actions):
-#   SERVER_URL  your server address, e.g. wss://pin-folders-production.up.railway.app
+#   SERVER_URL  your server address, e.g. wss://pin-folders.yourname.workers.dev
 #   ACCESS_KEY  the same ACCESS_KEY you set on the server
 #
 # To ship an update:
@@ -61,6 +61,22 @@ jobs:
           "
 
       - run: npm install
+
+      # GitHub only publishes a release that has a tag, so make one
+      # (v + the version in app/package.json) when started by hand.
+      - name: Create version tag
+        if: github.ref_type != 'tag'
+        shell: bash
+        run: |
+          V="v$(node -p "require('./package.json').version")"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/$V" >/dev/null; then
+            echo "Tag $V already exists"
+          else
+            git tag "$V"
+            git push origin "$V"
+          fi
 
       - name: Build and publish
         run: npm run release
