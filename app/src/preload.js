@@ -8,7 +8,9 @@ contextBridge.exposeInMainWorld('pf', {
   openMessage: (item) =>
     ipcRenderer.send('open-message', { guildId: item.guildId, channelId: item.channelId, messageId: item.messageId }),
   openExternal: (url) => ipcRenderer.send('open-external', url),
+  checkForUpdates: () => ipcRenderer.send('update:check'),
   installUpdate: () => ipcRenderer.send('update:install'),
   onUpdate: (cb) => ipcRenderer.on('update:status', (_e, d) => cb(d)),
   onDiscordStatus: (cb) => ipcRenderer.on('discord:status', (_e, s) => cb(s)),
+  onDiscordTitle: (cb) => ipcRenderer.on('discord:title', (_e, t) => cb(t)),
 });

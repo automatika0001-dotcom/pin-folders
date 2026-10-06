@@ -17,6 +17,7 @@ const IsWindowVisible = user32.func('int __stdcall IsWindowVisible(intptr_t hWnd
 const IsIconic = user32.func('int __stdcall IsIconic(intptr_t hWnd)');
 const IsZoomed = user32.func('int __stdcall IsZoomed(intptr_t hWnd)');
 const GetWindowTextLengthW = user32.func('int __stdcall GetWindowTextLengthW(intptr_t hWnd)');
+const GetWindowTextW = user32.func('int __stdcall GetWindowTextW(intptr_t hWnd, void *buf, int max)');
 const GetClassNameW = user32.func('int __stdcall GetClassNameW(intptr_t hWnd, void *buf, int max)');
 const GetWindowRect = user32.func('int __stdcall GetWindowRect(intptr_t hWnd, _Out_ RECT *rect)');
 const SetWindowPos = user32.func('int __stdcall SetWindowPos(intptr_t hWnd, intptr_t after, int x, int y, int cx, int cy, uint32_t flags)');
@@ -31,6 +32,7 @@ const SWP_NOSIZE = 0x0001;
 const SWP_NOMOVE = 0x0002;
 const SWP_NOZORDER = 0x0004;
 const SWP_NOACTIVATE = 0x0010;
+const SW_SHOWNOACTIVATE = 4;
 const SW_MINIMIZE = 6;
 const SW_RESTORE = 9;
 const DWMWA_EXTENDED_FRAME_BOUNDS = 9;
@@ -150,5 +152,12 @@ module.exports = {
   isMaximized: (hwnd) => !!IsZoomed(hwnd),
   minimize: (hwnd) => ShowWindow(hwnd, SW_MINIMIZE),
   restore: (hwnd) => ShowWindow(hwnd, SW_RESTORE),
+  // Un-minimizes a window without giving it keyboard focus.
+  showNoActivate: (hwnd) => ShowWindow(hwnd, SW_SHOWNOACTIVATE),
+  title: (hwnd) => {
+    const buf = Buffer.alloc(1024);
+    const n = GetWindowTextW(hwnd, buf, 512);
+    return buf.toString('utf16le', 0, n * 2);
+  },
   foreground: () => h(GetForegroundWindow()),
 };

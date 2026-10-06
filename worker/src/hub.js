@@ -2,9 +2,12 @@
 // holds every panel's live WebSocket. Any change is pushed to all panels.
 // WebSockets use hibernation, so idle connections cost (almost) nothing.
 import { DurableObject } from 'cloudflare:workers';
+import { fetchAllPins, fetchChannels, snapshotOf } from './discordApi.js';
 
 const GUILD_CACHE_MS = 10 * 60 * 1000;
 const PENDING_TTL_MS = 15 * 60 * 1000;
+const CHANNEL_CACHE_MS = 10 * 60 * 1000;
+const PIN_CACHE_MS = 20 * 1000;
 
 export class Hub extends DurableObject {
   constructor(ctx, env) {
@@ -41,8 +44,9 @@ export class Hub extends DurableObject {
     }
     if (m.op === 'ping') return ws.send('{"type":"pong"}');
     try {
-      await this.applyOp(m);
-      await this.broadcast();
+      const result = await this.applyOp(m);
+      if (result?.reply) ws.send(JSON.stringify(result.reply));
+      if (!result?.quiet) await this.broadcast();
     } catch (e) {
       ws.send(JSON.stringify({ type: 'error', message: e.message }));
     }
@@ -161,9 +165,92 @@ export class Hub extends DurableObject {
       case 'removeItem':
         this.sql.exec('DELETE FROM items WHERE id = ?', m.id);
         return;
+      // ----- current channel's pins (answered only to the asking panel) -----
+      case 'viewChannel':
+        return { quiet: true, reply: await this.viewChannel(m) };
+      case 'listChannels':
+        await this.requireGuild(m.guildId);
+        return { quiet: true, reply: { type: 'channels', guildId: m.guildId, channels: await this.channelsFor(m.guildId) } };
+      case 'fileFromChannel':
+        return this.fileFromChannel(m);
       default:
         throw new Error('Unknown operation');
     }
+  }
+
+  // ---------- current channel's pins ----------
+  async channelsFor(guildId) {
+    if (this.env.DEV_FIXTURES) return JSON.parse(this.env.DEV_FIXTURES).channels?.[guildId] || [];
+    this.chanCache ||= new Map();
+    const hit = this.chanCache.get(guildId);
+    if (hit && Date.now() - hit.at < CHANNEL_CACHE_MS) return hit.list;
+    const list = await fetchChannels(guildId, this.env.DISCORD_TOKEN);
+    this.chanCache.set(guildId, { at: Date.now(), list });
+    return list;
+  }
+
+  async pinsFor(guildId, channel, force = false) {
+    this.pinCache ||= new Map();
+    const hit = this.pinCache.get(channel.id);
+    if (!force && hit && Date.now() - hit.at < PIN_CACHE_MS) return hit.pins;
+    const raw = this.env.DEV_FIXTURES
+      ? JSON.parse(this.env.DEV_FIXTURES).pins?.[channel.id] || []
+      : await fetchAllPins(channel.id, this.env.DISCORD_TOKEN);
+    const pins = raw.map((m) => snapshotOf(m, { guildId, channelId: channel.id, channelName: channel.name }, null));
+    this.pinCache.set(channel.id, { at: Date.now(), pins });
+    return pins;
+  }
+
+  // Works out which channel Discord is showing from its window title,
+  // e.g. "#general | My Server - Discord".
+  async resolveTitle(title) {
+    const t = String(title || '').toLowerCase();
+    if (!t) return null;
+    const guilds = [...(await this.guilds())].sort((a, b) => b.name.length - a.name.length);
+    const named = guilds.find((g) => t.includes(g.name.toLowerCase()));
+    const candidates = named ? [named] : guilds.slice(0, 10);
+    const segments = t.split(/\s+[|\-\u2013\u2014]\s+/).map((x) => x.trim().replace(/^#/, ''));
+    for (const g of candidates) {
+      const chans = await this.channelsFor(g.id);
+      const byHash = chans
+        .filter((c) => t.includes('#' + c.name.toLowerCase()))
+        .sort((a, b) => b.name.length - a.name.length)[0];
+      const ch = byHash || chans.find((c) => segments.includes(c.name.toLowerCase()));
+      if (ch) return { guildId: g.id, channel: ch };
+    }
+    return null;
+  }
+
+  async viewChannel(m) {
+    const base = { type: 'channel', reqId: m.reqId ?? null };
+    try {
+      let target = null;
+      if (m.guildId && m.channelId) {
+        await this.requireGuild(m.guildId);
+        const ch = (await this.channelsFor(m.guildId)).find((c) => c.id === m.channelId);
+        if (!ch) throw new Error('Channel not found');
+        target = { guildId: m.guildId, channel: ch };
+      } else if (m.title) {
+        target = await this.resolveTitle(m.title);
+      }
+      if (!target) return { ...base, ok: false, reason: 'no-match' };
+      const pins = await this.pinsFor(target.guildId, target.channel, !!m.force);
+      return { ...base, ok: true, guildId: target.guildId, channelId: target.channel.id, channelName: target.channel.name, pins };
+    } catch (e) {
+      return { ...base, ok: false, reason: e.message };
+    }
+  }
+
+  async fileFromChannel(m) {
+    await this.requireGuild(m.guildId);
+    const folder = this.getFolder(m.folderId);
+    if (!folder || folder.guild_id !== m.guildId) throw new Error('Folder not found');
+    const ch = (await this.channelsFor(m.guildId)).find((c) => c.id === m.channelId);
+    if (!ch) throw new Error('Channel not found');
+    let pin = (await this.pinsFor(m.guildId, ch)).find((p) => p.messageId === m.messageId);
+    if (!pin) pin = (await this.pinsFor(m.guildId, ch, true)).find((p) => p.messageId === m.messageId);
+    if (!pin) throw new Error('That message is no longer pinned');
+    this.upsertItem({ ...pin, addedBy: m.by || null, addedAt: Date.now() }, folder.id);
   }
 
   // ---------- storage helpers ----------

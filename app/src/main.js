@@ -38,10 +38,14 @@ let discord = 0; // Discord window handle
 let discordSeen = false;
 let quitting = false;
 let ignoreGeometryUntil = 0;
+let ignorePanelStateUntil = 0; // panel minimize/restore events we caused ourselves
 let lastDiscordRect = null;
 let lastPanelRect = null;
+let lastDiscordMin = null;
 let missingSince = null;
 let lastForeground = 0;
+let lastTitle = null;
+let titleTick = 0;
 let syncTimer = null;
 
 if (!app.requestSingleInstanceLock()) {
@@ -49,8 +53,8 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => {
     if (!panel) return;
-    panel.showInactive();
     if (discord && dw.isMinimized(discord)) dw.restore(discord);
+    showPanelQuietly();
     layout();
     panel.focus();
   });
@@ -62,8 +66,7 @@ async function start() {
   setupUpdater();
 
   if (!isWin) {
-    // Dev convenience on other systems: just show the panel.
-    panel.show();
+    panel.show(); // dev convenience on other systems
     return;
   }
 
@@ -91,7 +94,7 @@ function createPanel() {
     minHeight: 400,
     show: false,
     frame: false,
-    backgroundColor: '#1e1f22',
+    backgroundColor: '#1a1a1e',
     title: 'Pin Folders',
     icon: path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: {
@@ -106,11 +109,23 @@ function createPanel() {
 
   panel.on('move', onPanelGeometry);
   panel.on('resize', onPanelGeometry);
+
+  // User minimized the panel (button or taskbar): minimize Discord too.
   panel.on('minimize', () => {
-    if (discord && dw.isAlive(discord) && !dw.isMinimized(discord)) dw.minimize(discord);
+    if (Date.now() < ignorePanelStateUntil) return;
+    if (discordOk() && !dw.isMinimized(discord)) {
+      lastDiscordMin = true;
+      dw.minimize(discord);
+    }
   });
+  // User restored the panel (taskbar): bring Discord back too.
   panel.on('restore', () => {
-    if (discord && dw.isAlive(discord) && dw.isMinimized(discord)) dw.restore(discord);
+    if (Date.now() < ignorePanelStateUntil) return;
+    if (discordOk() && dw.isMinimized(discord)) {
+      lastDiscordMin = false;
+      dw.restore(discord);
+      setTimeout(afterDiscordRestored, 150);
+    }
     raiseDiscordBehindPanel();
   });
   panel.on('focus', raiseDiscordBehindPanel);
@@ -120,16 +135,20 @@ function createPanel() {
       shutdown();
     }
   });
-  // Links inside the panel open in the real browser.
   panel.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+  panel.webContents.on('did-finish-load', () => {
+    lastTitle = null; // resend the Discord title after a reload
   });
 }
 
 function send(channel, payload) {
   if (panel && !panel.isDestroyed()) panel.webContents.send(channel, payload);
 }
+
+const discordOk = () => discord && dw.isAlive(discord);
 
 // ---------- Discord process ----------
 function launchDiscord() {
@@ -189,23 +208,51 @@ function placePanelAlone() {
   setPanelDip({ x: wa.x + wa.width - config.panelWidth, y: wa.y, width: config.panelWidth, height: wa.height });
 }
 
-/** Fits Discord + panel side by side on Discord's current screen. */
+// Un-minimizes the panel without stealing focus from Discord.
+function showPanelQuietly() {
+  if (!panel.isMinimized() && panel.isVisible()) return;
+  ignorePanelStateUntil = Date.now() + 600;
+  if (isWin) dw.showNoActivate(panelHwnd);
+  else panel.showInactive();
+}
+
+/** Fits Discord + panel side by side, filling Discord's current screen. */
 function layout() {
-  if (!discord || !dw.isAlive(discord)) return placePanelAlone();
+  if (!discordOk()) return placePanelAlone();
   if (dw.isMinimized(discord) || dw.isMaximized(discord)) dw.restore(discord);
+  showPanelQuietly();
 
   const current = screen.screenToDipRect(null, dw.getRect(discord));
   const wa = screen.getDisplayMatching(current).workArea;
-  const pw = Math.min(config.panelWidth, Math.floor(wa.width / 2));
+  const pw = Math.min(lastPanelRect ? screen.screenToDipRect(null, lastPanelRect).width : config.panelWidth, Math.floor(wa.width / 2));
 
   setPanelDip({ x: wa.x + wa.width - pw, y: wa.y, width: pw, height: wa.height });
   dw.setRect(discord, screen.dipToScreenRect(null, { x: wa.x, y: wa.y, width: wa.width - pw, height: wa.height }));
   lastDiscordRect = dw.getRect(discord);
   raiseDiscordBehindPanel();
+  panel.moveTop();
 }
 
 function raiseDiscordBehindPanel() {
-  if (discord && dw.isAlive(discord) && !dw.isMinimized(discord)) dw.placeBehind(discord, panelHwnd);
+  if (discordOk() && !dw.isMinimized(discord)) dw.placeBehind(discord, panelHwnd);
+}
+
+// Discord just came back from being minimized.
+function afterDiscordRestored() {
+  if (!discordOk() || dw.isMinimized(discord)) return;
+  showPanelQuietly();
+  if (dw.isMaximized(discord)) return layout(); // was maximized before: fill the screen together
+  followDiscord(true);
+  panel.moveTop();
+}
+
+// Keeps the panel glued to Discord's right edge.
+function followDiscord(force = false) {
+  const r = dw.getRect(discord);
+  if (!force && sameRect(r, lastDiscordRect)) return;
+  lastDiscordRect = r;
+  const p = panelPhys();
+  setPanelPhys({ x: r.x + r.width, y: r.y, width: p.width, height: r.height });
 }
 
 // User dragged or resized the panel: Discord follows.
@@ -214,15 +261,13 @@ function onPanelGeometry() {
   const p = panelPhys();
   const prev = lastPanelRect || p;
   lastPanelRect = p;
-  if (Date.now() < ignoreGeometryUntil || !discord || !dw.isAlive(discord) || dw.isMinimized(discord)) return;
+  if (Date.now() < ignoreGeometryUntil || !discordOk() || dw.isMinimized(discord)) return;
 
   const d = dw.getRect(discord);
   let next;
   if (Math.abs(p.width - prev.width) > 1) {
-    // Panel resized from its left edge: Discord keeps its left side and shrinks/grows.
     next = { x: d.x, y: p.y, width: Math.max(400, p.x - d.x), height: p.height };
   } else {
-    // Panel moved: Discord moves with it, glued to its left edge.
     next = { x: p.x - d.width, y: p.y, width: d.width, height: p.height };
   }
   dw.setRect(discord, next);
@@ -237,6 +282,7 @@ function tick() {
     const found = dw.findDiscordWindow(flavor.exe);
     if (found && found !== discord) {
       discord = found;
+      lastDiscordMin = null;
       if (!discordSeen) {
         discordSeen = true;
         send('discord:status', 'ok');
@@ -245,7 +291,7 @@ function tick() {
     }
   }
 
-  if (!discord || !dw.isAlive(discord)) {
+  if (!discordOk()) {
     // Discord was closed (or sent to tray with its X). Close everything.
     if (discordSeen) {
       missingSince ??= Date.now();
@@ -255,22 +301,40 @@ function tick() {
   }
   missingSince = null;
 
-  // Minimize / restore together
+  // Tell the panel which channel Discord is showing (from the window title).
+  if (++titleTick % 5 === 0) {
+    const title = dw.title(discord);
+    if (title && title !== lastTitle) {
+      lastTitle = title;
+      send('discord:title', title);
+    }
+  }
+
+  // Minimize / restore together. Only react to changes, so we never fight
+  // the user while Windows is animating.
   const dMin = dw.isMinimized(discord);
-  if (dMin && !panel.isMinimized()) panel.minimize();
-  else if (!dMin && panel.isMinimized()) panel.showInactive();
+  if (lastDiscordMin === null) lastDiscordMin = dMin;
+  if (dMin !== lastDiscordMin) {
+    lastDiscordMin = dMin;
+    if (dMin) {
+      if (!panel.isMinimized()) {
+        ignorePanelStateUntil = Date.now() + 600;
+        panel.minimize();
+      }
+    } else {
+      afterDiscordRestored();
+    }
+    return;
+  }
   if (dMin) return;
 
-  // Someone maximized Discord: re-fit so the panel stays visible.
+  // Discord was maximized (button, double-click or snap): fill the screen
+  // with Discord + panel instead of letting Discord cover the panel.
   if (dw.isMaximized(discord)) return layout();
 
-  // Discord moved/resized: the panel follows, glued to its right edge.
-  const r = dw.getRect(discord);
-  if (!sameRect(r, lastDiscordRect)) {
-    lastDiscordRect = r;
-    const p = panelPhys();
-    setPanelPhys({ x: r.x + r.width, y: r.y, width: p.width, height: r.height });
-  }
+  if (panel.isMinimized()) showPanelQuietly();
+
+  followDiscord();
 
   // Clicking into Discord brings the panel up with it (without stealing focus).
   const fg = dw.foreground();
@@ -299,8 +363,8 @@ ipcMain.on('win:close', () => shutdown());
 ipcMain.on('win:snap', () => layout());
 ipcMain.on('open-message', (_e, { guildId, channelId, messageId }) => {
   if (![guildId, channelId, messageId].every((v) => /^\d{5,25}$/.test(String(v)))) return;
+  if (discordOk() && dw.isMinimized(discord)) dw.restore(discord);
   shell.openExternal(`discord://-/channels/${guildId}/${channelId}/${messageId}`);
-  if (discord && dw.isMinimized(discord)) dw.restore(discord);
 });
 ipcMain.on('open-external', (_e, url) => {
   if (/^https?:\/\//.test(String(url))) shell.openExternal(url);
@@ -312,16 +376,27 @@ ipcMain.on('update:install', () => {
   clearInterval(syncTimer);
   autoUpdater.quitAndInstall(true, true);
 });
+ipcMain.on('update:check', () => {
+  if (!app.isPackaged) return send('update:status', { state: 'dev' });
+  if (updateReadyVersion) return send('update:status', { state: 'ready', version: updateReadyVersion });
+  autoUpdater.checkForUpdates().catch((e) => send('update:status', { state: 'error', message: e?.message }));
+});
 
 // ---------- auto-update ----------
+let updateReadyVersion = null;
 function setupUpdater() {
   if (!app.isPackaged) return;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true; // if ignored, installs next time you close
+  autoUpdater.on('checking-for-update', () => send('update:status', { state: 'checking' }));
+  autoUpdater.on('update-not-available', () => send('update:status', { state: 'none' }));
   autoUpdater.on('update-available', (i) => send('update:status', { state: 'downloading', version: i.version, percent: 0 }));
   autoUpdater.on('download-progress', (p) => send('update:status', { state: 'downloading', percent: Math.round(p.percent) }));
-  autoUpdater.on('update-downloaded', (i) => send('update:status', { state: 'ready', version: i.version }));
-  autoUpdater.on('error', (e) => console.error('Updater:', e?.message));
+  autoUpdater.on('update-downloaded', (i) => {
+    updateReadyVersion = i.version;
+    send('update:status', { state: 'ready', version: i.version });
+  });
+  autoUpdater.on('error', (e) => send('update:status', { state: 'error', message: e?.message }));
   const check = () => autoUpdater.checkForUpdates().catch(() => {});
   setTimeout(check, 5000);
   setInterval(check, Math.max(5, config.updateCheckMinutes) * 60 * 1000);

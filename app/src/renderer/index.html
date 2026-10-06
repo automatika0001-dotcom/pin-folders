@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src https: data:; connect-src ws: wss:; style-src 'self'; script-src 'self'" />
+        content="default-src 'self'; img-src https: data:; connect-src ws: wss: http: https:; style-src 'self'; script-src 'self'" />
   <title>Pin Folders</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -32,8 +32,12 @@
   <section class="toolbar">
     <div class="row">
       <select id="guild" title="Server"></select>
-      <span id="status" class="status" title="Connection"><i></i><b>Connecting</b></span>
+      <span id="status" class="status" title="Connection to the shared server"><i></i><b>Connecting</b></span>
     </div>
+    <label class="channel-row" title="Which channel's pins appear under No Label">
+      <span class="channel-label">Pins from</span>
+      <select id="channel"><option value="auto">Follow Discord</option></select>
+    </label>
     <input id="search" type="search" placeholder="Search pinned messages" spellcheck="false" />
   </section>
 
@@ -43,7 +47,7 @@
     <button id="btn-new" class="primary">
       <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> New folder
     </button>
-    <span id="version" class="version"></span>
+    <button id="version" class="version" title="Check for updates"></button>
   </footer>
 
   <dialog id="dialog">
@@ -52,7 +56,7 @@
       <p id="dlg-text"></p>
       <input id="dlg-input" maxlength="60" spellcheck="false" />
       <div class="dlg-actions">
-        <button value="cancel" type="submit" class="ghost">Cancel</button>
+        <button value="cancel" type="submit" class="ghost-btn">Cancel</button>
         <button value="ok" type="submit" id="dlg-ok" class="primary">OK</button>
       </div>
     </form>

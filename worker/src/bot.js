@@ -2,7 +2,7 @@
 // Discord calls us over HTTPS (Interactions Endpoint URL), so no always-on
 // bot connection is needed. This is why the bot shows as offline in the
 // member list even though everything works.
-const API = 'https://discord.com/api/v10';
+import { API, fetchAllPins, snapshotOf as makeSnapshot } from './discordApi.js';
 const EPHEMERAL = 64;
 
 const COMMANDS = [
@@ -171,60 +171,9 @@ async function importPins(i, env, hub, folderName, by) {
   });
 }
 
-// Uses the newer paginated pins endpoint, falling back to the older one.
-async function fetchAllPins(channelId, token) {
-  const headers = { Authorization: `Bot ${token}` };
-  const out = [];
-  let before = null;
-  for (let page = 0; page < 20; page++) {
-    const qs = new URLSearchParams({ limit: '50' });
-    if (before) qs.set('before', before);
-    const res = await fetch(`${API}/channels/${channelId}/messages/pins?${qs}`, { headers });
-    if (res.status === 404 && page === 0) {
-      const old = await fetch(`${API}/channels/${channelId}/pins`, { headers });
-      if (!old.ok) throw new Error(pinsError(old.status));
-      return old.json();
-    }
-    if (!res.ok) throw new Error(pinsError(res.status));
-    const body = await res.json();
-    const items = body.items || [];
-    out.push(...items.map((x) => x.message));
-    if (!body.has_more || !items.length) break;
-    before = items[items.length - 1].pinned_at;
-  }
-  return out;
-}
-
-function pinsError(status) {
-  return status === 403
-    ? 'the bot cannot see this channel (it needs View Channels and Read Message History here)'
-    : `Discord returned ${status}`;
-}
-
-function snapshotOf(m, i, addedBy) {
-  const author = m.author || {};
-  const embed = m.embeds?.[0];
-  const embedText = embed ? [embed.title, embed.description].filter(Boolean).join(' - ') : '';
-  let avatar = null;
-  if (author.avatar) avatar = `https://cdn.discordapp.com/avatars/${author.id}/${author.avatar}.png?size=64`;
-  else if (author.id) avatar = `https://cdn.discordapp.com/embed/avatars/${Number((BigInt(author.id) >> 22n) % 6n)}.png`;
-  return {
-    guildId: i.guild_id,
-    channelId: m.channel_id || i.channel_id,
-    channelName: i.channel?.name || null,
-    messageId: m.id,
-    authorName: m.member?.nick || author.global_name || author.username || 'Unknown',
-    authorAvatar: avatar,
-    content: (m.content || embedText || '').slice(0, 1500),
-    attachments: (m.attachments || []).slice(0, 4).map((a) => ({
-      name: a.filename,
-      url: a.url,
-      contentType: a.content_type || null,
-    })),
-    createdAt: Date.parse(m.timestamp) || Date.now(),
-    addedBy,
-    addedAt: Date.now(),
-  };
+// Snapshot of a message, using the interaction for server/channel context.
+function snapshotOf(m, i, by) {
+  return makeSnapshot(m, { guildId: i.guild_id, channelId: i.channel_id, channelName: i.channel?.name }, by);
 }
 
 function optionValue(options, name) {
