@@ -1,0 +1,68 @@
+# Builds the Windows app and publishes it to this repo's Releases page.
+# Everyone's installed app picks up new versions automatically.
+#
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   SERVER_URL  your server address, e.g. wss://pin-folders-production.up.railway.app
+#   ACCESS_KEY  the same ACCESS_KEY you set on the server
+#
+# To ship an update:
+#   1. Change "version" in app/package.json (e.g. 1.0.0 -> 1.0.1)
+#   2. Actions tab > Release app > Run workflow
+name: Release app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fill in server address, access key and release target
+        shell: bash
+        env:
+          SERVER_URL: ${{ secrets.SERVER_URL }}
+          ACCESS_KEY: ${{ secrets.ACCESS_KEY }}
+        run: |
+          node -e "
+          const fs = require('fs');
+          const { SERVER_URL, ACCESS_KEY, GITHUB_REPOSITORY, GITHUB_REF_NAME, GITHUB_REF_TYPE } = process.env;
+          if (!SERVER_URL || !ACCESS_KEY) {
+            console.error('Missing SERVER_URL or ACCESS_KEY repository secret. See the setup guide.');
+            process.exit(1);
+          }
+          const c = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+          c.serverUrl = SERVER_URL.trim();
+          c.accessKey = ACCESS_KEY.trim();
+          fs.writeFileSync('config.json', JSON.stringify(c, null, 2));
+
+          const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          if (GITHUB_REF_TYPE === 'tag' && GITHUB_REF_NAME.replace(/^v/, '') !== p.version) {
+            console.error('Tag ' + GITHUB_REF_NAME + ' does not match app/package.json version ' + p.version);
+            process.exit(1);
+          }
+          const [owner, repo] = GITHUB_REPOSITORY.split('/');
+          p.build.publish = [{ provider: 'github', owner, repo, releaseType: 'release' }];
+          fs.writeFileSync('package.json', JSON.stringify(p, null, 2));
+          console.log('Building version ' + p.version + ' for ' + GITHUB_REPOSITORY);
+          "
+
+      - run: npm install
+
+      - name: Build and publish
+        run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
