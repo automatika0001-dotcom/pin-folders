@@ -1,0 +1,22 @@
+name = "pin-folders"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+# Keep settings you add in the Cloudflare dashboard when the code redeploys.
+keep_vars = true
+
+# One Durable Object holds all folders (in SQLite) and every live panel connection.
+# SQLite-backed Durable Objects are included in Cloudflare's free plan.
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hub"]
+
+# Secrets (add them in the dashboard: Worker > Settings > Variables and Secrets):
+#   DISCORD_TOKEN           bot token
+#   DISCORD_PUBLIC_KEY      from the Discord app's General Information page
+#   DISCORD_APPLICATION_ID  from the Discord app's General Information page
+#   ACCESS_KEY              shared password the panels use to connect
