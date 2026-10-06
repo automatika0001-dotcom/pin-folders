@@ -1,0 +1,63 @@
+{
+  "name": "pin-folders",
+  "productName": "Pin Folders",
+  "version": "1.0.0",
+  "description": "Shared, live pin folders that sit next to Discord",
+  "main": "src/main.js",
+  "author": "Your Team",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "koffi": "^2.16.3"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.yourteam.pinfolders",
+    "productName": "Pin Folders",
+    "files": [
+      "src/**/*",
+      "build/icon.png",
+      "config.json",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Pin Folders",
+      "artifactName": "PinFolders-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "YOUR_GITHUB_USERNAME",
+        "repo": "pin-folders-releases",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src https: data:; connect-src ws: wss:; style-src 'self'; script-src 'self'" />
+  <title>Pin Folders</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" class="logo" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h4l2 2.2h7A2.5 2.5 0 0 1 21 8.7v8.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></svg>
+      <span>Pin Folders</span>
+    </div>
+    <div class="win-buttons">
+      <button id="btn-snap" title="Re-fit Discord and panel to the screen">
+        <svg viewBox="0 0 24 24"><path d="M3 5h11v14H3zM16 5h5v14h-5z"/></svg>
+      </button>
+      <button id="btn-min" title="Minimize both">
+        <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
+      </button>
+      <button id="btn-close" class="close" title="Close Discord and panel">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="update-banner" class="banner hidden"></div>
+  <div id="discord-banner" class="banner muted hidden"></div>
+
+  <section class="toolbar">
+    <div class="row">
+      <select id="guild" title="Server"></select>
+      <span id="status" class="status" title="Connection"><i></i><b>Connecting</b></span>
+    </div>
+    <input id="search" type="search" placeholder="Search pinned messages" spellcheck="false" />
+  </section>
+
+  <main id="folders" class="folders"></main>
+
+  <footer class="footer">
+    <button id="btn-new" class="primary">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> New folder
+    </button>
+    <span id="version" class="version"></span>
+  </footer>
+
+  <dialog id="dialog">
+    <form method="dialog">
+      <h3 id="dlg-title"></h3>
+      <p id="dlg-text"></p>
+      <input id="dlg-input" maxlength="60" spellcheck="false" />
+      <div class="dlg-actions">
+        <button value="cancel" type="submit" class="ghost">Cancel</button>
+        <button value="ok" type="submit" id="dlg-ok" class="primary">OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="menu" class="menu hidden"></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

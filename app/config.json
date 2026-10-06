@@ -1,0 +1,8 @@
+{
+  "serverUrl": "wss://YOUR-SERVER-ADDRESS",
+  "accessKey": "CHANGE-ME-to-the-same-ACCESS_KEY-as-the-server",
+  "discordFlavor": "stable",
+  "panelWidth": 380,
+  "closeDiscordCompletely": true,
+  "updateCheckMinutes": 30
+}
