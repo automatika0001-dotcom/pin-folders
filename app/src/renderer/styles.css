@@ -102,6 +102,10 @@ select:focus, input:focus { border-color: var(--accent); }
 .folder.nolabel .folder-head .name { font-style: normal; }
 .folder.collapsed .items { display: none; }
 .items { display: grid; gap: 2px; padding: 2px 0 6px 4px; }
+.items.capped { overflow-y: auto; padding-right: 2px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.items.capped::-webkit-scrollbar { width: 6px; }
+.items.capped::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 3px; }
+.folder.nolabel { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--line); border-radius: 0; }
 .empty-folder { color: var(--muted); font-size: 12px; padding: 6px 10px 8px; line-height: 1.4; }
 
 /* drop targets */

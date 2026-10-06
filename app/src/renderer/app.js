@@ -191,15 +191,19 @@ function render() {
   const byNew = (a, b) => (b.data.addedAt || b.data.createdAt || 0) - (a.data.addedAt || a.data.createdAt || 0);
   const nextKeys = new Set(all.map((e) => e.key));
 
-  // "No Label" first: the inbox you sort from.
-  const noLabel = all.filter((e) => !e.folderId).sort(byNew);
-  root.appendChild(folderEl({ id: null, name: 'No Label' }, noLabel));
+  const prevInboxScroll = root.dataset.inboxScroll ? Number(root.dataset.inboxScroll) : 0;
 
   for (const f of guildFolders()) {
     const its = all.filter((e) => e.folderId === f.id).sort(byNew);
     if (query && !its.length) continue;
     root.appendChild(folderEl(f, its));
   }
+
+  // "No Label" sits at the bottom and shows 3 pins at a time; scroll for the rest.
+  const noLabel = all.filter((e) => !e.folderId).sort(byNew);
+  const inbox = folderEl({ id: null, name: 'No Label' }, noLabel);
+  root.appendChild(inbox);
+  limitInbox(inbox, prevInboxScroll);
 
   if (seenKeys) {
     for (const el of root.querySelectorAll('.item')) if (!seenKeys.has(el.dataset.key)) el.classList.add('enter');
@@ -215,6 +219,24 @@ function render() {
     receivedFolder = null;
   }
   root.scrollTop = scroll;
+}
+
+// Caps the No Label list at 3 visible pins (cards vary in height, so measure).
+const INBOX_VISIBLE = 3;
+function limitInbox(folder, restoreScroll = 0) {
+  const list = folder.querySelector('.items');
+  const cards = list.querySelectorAll('.item');
+  list.classList.remove('capped');
+  list.style.maxHeight = '';
+  if (cards.length <= INBOX_VISIBLE) return;
+  const top = list.getBoundingClientRect().top;
+  const cut = cards[INBOX_VISIBLE].getBoundingClientRect().top;
+  list.style.maxHeight = Math.max(120, Math.round(cut - top)) + 'px';
+  list.classList.add('capped');
+  list.scrollTop = restoreScroll;
+  list.addEventListener('scroll', () => {
+    $('#folders').dataset.inboxScroll = String(list.scrollTop);
+  });
 }
 
 function renderGuilds() {
@@ -539,6 +561,7 @@ function onDragEnd() {
 function toggleFolder(folderEl) {
   const key = folderEl.dataset.id;
   folderEl.classList.toggle('collapsed');
+  if (key === 'nolabel' && !folderEl.classList.contains('collapsed')) limitInbox(folderEl);
   folderEl.classList.contains('collapsed') ? collapsed.add(key) : collapsed.delete(key);
   saveCollapsed();
 }
