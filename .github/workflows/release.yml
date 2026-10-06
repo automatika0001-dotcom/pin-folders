@@ -78,7 +78,28 @@ jobs:
             git push origin "$V"
           fi
 
-      - name: Build and publish
-        run: npm run release
+      # Build only. Uploading is done in the next step with GitHub's own tool,
+      # which is more reliable and fails loudly if anything is missing.
+      - name: Build installer
+        run: npm run dist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          TAG="v$VER"
+          cd dist
+          FILES=("PinFolders-Setup-$VER.exe" "PinFolders-Setup-$VER.exe.blockmap" "latest.yml")
+          for f in "${FILES[@]}"; do
+            [ -f "$f" ] || { echo "Missing build output: $f"; ls -la; exit 1; }
+          done
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "Pin Folders $TAG" --verify-tag
+          fi
+          gh release upload "$TAG" "${FILES[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "Published $TAG with:"; gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'

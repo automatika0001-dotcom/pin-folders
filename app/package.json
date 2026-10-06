@@ -1,7 +1,7 @@
 {
   "name": "pin-folders",
   "productName": "Pin Folders",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Shared, live pin folders that sit next to Discord",
   "main": "src/main.js",
   "author": "Your Team",
