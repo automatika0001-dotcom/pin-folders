@@ -100,18 +100,63 @@ select:focus, input:focus { border-color: var(--accent); }
 .folder-head:hover .more { opacity: 1; }
 .folder-head .more:hover { color: var(--text-strong); background: var(--bg-deep); }
 .folder.nolabel .folder-head .name { font-style: normal; }
-.folder.collapsed .items { display: none; }
+.folder.collapsed > .folder-body { display: none; }
 .items { display: grid; gap: 2px; padding: 2px 0 6px 4px; }
 .items.capped { overflow-y: auto; padding-right: 2px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
 .items.capped::-webkit-scrollbar { width: 6px; }
 .items.capped::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 3px; }
 .folder.nolabel { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--line); border-radius: 0; }
+
+/* ---------- folders inside folders ---------- */
+.folder-head .ficon { width: 14px; height: 14px; flex: none; fill: currentColor; stroke: none; opacity: .55; margin-left: -2px; }
+.subfolders { margin: 0 0 4px 9px; padding-left: 6px; border-left: 1px solid var(--line-strong); display: grid; gap: 2px; }
+.folder.sub > .folder-head { padding-top: 6px; padding-bottom: 6px; }
+
+/* ---------- colored folders: the whole folder sits in a tinted box ---------- */
+.c-blurple { --fc: #5865f2; }
+.c-green   { --fc: #23a55a; }
+.c-yellow  { --fc: #f0b232; }
+.c-orange  { --fc: #ef8a3c; }
+.c-red     { --fc: #f23f43; }
+.c-pink    { --fc: #eb459e; }
+.c-purple  { --fc: #a465e0; }
+.c-teal    { --fc: #1fb8a8; }
+
+.folder.colored {
+  background: color-mix(in srgb, var(--fc) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--fc) 30%, transparent);
+  border-radius: 10px;
+  padding: 1px 3px 2px;
+  margin: 4px 0 6px;
+}
+.folder.colored > .folder-head { color: color-mix(in srgb, var(--fc) 62%, #ffffff); }
+.folder.colored > .folder-head .ficon { opacity: 1; color: var(--fc); }
+.folder.colored > .folder-head:hover { background: color-mix(in srgb, var(--fc) 14%, transparent); color: color-mix(in srgb, var(--fc) 40%, #ffffff); }
+.folder.colored > .folder-head .count { background: color-mix(in srgb, var(--fc) 24%, transparent); color: color-mix(in srgb, var(--fc) 35%, #ffffff); }
+.folder.colored > .folder-body > .items > .item:hover { background: color-mix(in srgb, var(--fc) 12%, transparent); }
+.folder.colored > .folder-body > .subfolders { border-left-color: color-mix(in srgb, var(--fc) 35%, transparent); }
+.folder.colored > .folder-body > .items > .empty-folder { color: color-mix(in srgb, var(--fc) 30%, var(--muted)); }
+.folder.colored.drop-target { background: color-mix(in srgb, var(--fc) 22%, transparent); border-color: var(--fc); }
+.folder.colored.drop-target > .folder-head { box-shadow: inset 3px 0 0 var(--fc); }
+.folder.colored.received > .folder-head .count { background: var(--fc); }
+.folder.colored.collapsed { padding-bottom: 1px; }
+
+/* color picker inside the folder menu */
+.swatches { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; padding: 2px 6px 6px; }
+.menu .swatches .sw {
+  width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 2px solid transparent;
+  background: var(--fc); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); transition: transform .1s var(--spring);
+}
+.menu .swatches .sw:hover { transform: scale(1.18); background: var(--fc); }
+.menu .swatches .sw.on { border-color: var(--text-strong); }
+.menu .swatches .sw.none { --fc: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); background: linear-gradient(135deg, transparent 45%, var(--muted) 45%, var(--muted) 55%, transparent 55%); }
+.menu .swatches .sw.none:hover { background: linear-gradient(135deg, transparent 45%, var(--text) 45%, var(--text) 55%, transparent 55%); }
 .empty-folder { color: var(--muted); font-size: 12px; padding: 6px 10px 8px; line-height: 1.4; }
 
 /* drop targets */
-.folder.drop-target { background: var(--accent-soft); transform: scale(1.012); }
+.folder.drop-target { background: var(--accent-soft); transform: scale(1.008); }
 .folder.drop-target > .folder-head { color: #fff; box-shadow: inset 3px 0 0 var(--accent); background: transparent; }
-.folder.drop-target .empty-folder { color: var(--text); }
+.folder.drop-target > .folder-body > .items > .empty-folder { color: var(--text); }
 .folder.drop-before { box-shadow: 0 -2px 0 var(--accent); }
 .folder.drop-after { box-shadow: 0 2px 0 var(--accent); }
 .folder.received > .folder-head .count { animation: bump .45s var(--spring); background: var(--accent); color: #fff; }
@@ -211,6 +256,82 @@ dialog p:empty { display: none; }
 
 .toast { position: fixed; left: 10px; right: 10px; bottom: 60px; background: var(--bg-float); border: 1px solid var(--line-strong); padding: 9px 12px; border-radius: 6px; font-size: 13px; box-shadow: 0 6px 18px rgba(0,0,0,.4); animation: drop-in .2s var(--ease); }
 
+/* ---------- Gamer mode switch (title bar) ---------- */
+.gamer-toggle {
+  -webkit-app-region: no-drag; margin-left: auto; margin-right: 6px; display: flex; align-items: center; gap: 6px;
+  border: 0; background: transparent; color: var(--muted); padding: 4px 6px; border-radius: 6px;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .7;
+  transition: opacity .15s, background .15s;
+}
+.gamer-toggle:hover { opacity: 1; background: var(--bg-hover); }
+.g-track { position: relative; width: 22px; height: 12px; border-radius: 6px; background: var(--line-strong); transition: background .2s; }
+.g-knob { position: absolute; top: 2px; left: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); transition: transform .22s var(--spring), background .2s; }
+.gamer-toggle[aria-checked="true"] { opacity: 1; }
+.gamer-toggle[aria-checked="true"] .g-knob { transform: translateX(10px); background: #fff; }
+
+/* ---------- Gamer mode: slow RGB that flows through text and UI ---------- */
+@property --hue { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --glow { syntax: '<number>'; inherits: true; initial-value: 0.35; }
+
+html.gamer {
+  animation: hue-cycle 16s linear infinite, glow-pulse 3.2s ease-in-out infinite alternate;
+  --accent: hsl(var(--hue) 78% 60%);
+  --accent-hover: hsl(var(--hue) 72% 52%);
+  --accent-soft: hsl(var(--hue) 85% 60% / .16);
+}
+@keyframes hue-cycle { from { --hue: 0; } to { --hue: 360; } }
+@keyframes glow-pulse { from { --glow: 0.25; } to { --glow: 0.8; } }
+
+/* glowing frame around the whole panel */
+html.gamer body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 2000;
+  box-shadow:
+    inset 0 0 0 1px hsl(var(--hue) 90% 62% / calc(.35 + var(--glow) * .4)),
+    inset 0 0 22px hsl(calc(var(--hue) + 40) 90% 60% / calc(var(--glow) * .18));
+}
+html.gamer .titlebar { box-shadow: 0 1px 0 hsl(var(--hue) 90% 60% / calc(.3 + var(--glow) * .4)); }
+html.gamer .brand span, html.gamer .g-label {
+  background: linear-gradient(90deg,
+    hsl(var(--hue) 95% 68%), hsl(calc(var(--hue) + 60) 95% 68%), hsl(calc(var(--hue) + 120) 95% 68%));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 calc(var(--glow) * 6px) hsl(var(--hue) 95% 60% / .55));
+}
+html.gamer .logo { fill: hsl(var(--hue) 90% 65%); filter: drop-shadow(0 0 calc(var(--glow) * 6px) hsl(var(--hue) 95% 60%)); }
+html.gamer .g-track { background: linear-gradient(90deg, hsl(var(--hue) 90% 55%), hsl(calc(var(--hue) + 90) 90% 55%), hsl(calc(var(--hue) + 180) 90% 55%)); box-shadow: 0 0 calc(var(--glow) * 10px) hsl(var(--hue) 95% 60% / .7); }
+
+/* the color travels down the list: each folder is a little further along the wheel */
+html.gamer .folder { --o: 0; }
+html.gamer .folder:nth-child(6n+2) { --o: 50; }
+html.gamer .folder:nth-child(6n+3) { --o: 100; }
+html.gamer .folder:nth-child(6n+4) { --o: 150; }
+html.gamer .folder:nth-child(6n+5) { --o: 200; }
+html.gamer .folder:nth-child(6n+6) { --o: 250; }
+html.gamer .folder:not(.colored) > .folder-head .name,
+html.gamer .folder:not(.colored) > .folder-head .ficon,
+html.gamer .folder:not(.colored) > .folder-head .chev {
+  color: hsl(calc(var(--hue) + var(--o)) 90% 72%);
+  text-shadow: 0 0 calc(var(--glow) * 10px) hsl(calc(var(--hue) + var(--o)) 95% 60% / .7);
+}
+html.gamer .folder:not(.colored) > .folder-head .ficon { opacity: .9; }
+html.gamer .folder:not(.colored) > .folder-head .count { background: hsl(calc(var(--hue) + var(--o)) 70% 50% / .22); color: hsl(calc(var(--hue) + var(--o)) 90% 82%); }
+html.gamer .folder.colored { box-shadow: 0 0 calc(var(--glow) * 14px) color-mix(in srgb, var(--fc) 45%, transparent); }
+html.gamer .subfolders { border-left-color: hsl(calc(var(--hue) + var(--o) + 30) 80% 60% / .45); }
+
+html.gamer .item { --io: 0; }
+html.gamer .item:nth-child(4n+2) { --io: 25; }
+html.gamer .item:nth-child(4n+3) { --io: 50; }
+html.gamer .item:nth-child(4n+4) { --io: 75; }
+html.gamer .author { color: hsl(calc(var(--hue) + var(--o, 0) + var(--io)) 85% 78%); text-shadow: 0 0 calc(var(--glow) * 8px) hsl(calc(var(--hue) + var(--o, 0) + var(--io)) 95% 60% / .5); }
+html.gamer .avatar { box-shadow: 0 0 0 2px hsl(calc(var(--hue) + var(--o, 0) + var(--io)) 85% 60% / calc(.3 + var(--glow) * .5)); }
+html.gamer .item:hover { box-shadow: inset 0 0 0 1px hsl(calc(var(--hue) + var(--o, 0) + var(--io)) 90% 60% / .45); }
+html.gamer .jump:hover { border-color: var(--accent); box-shadow: 0 0 10px hsl(var(--hue) 90% 60% / .5); }
+html.gamer .primary { box-shadow: 0 0 calc(var(--glow) * 16px) hsl(var(--hue) 90% 60% / .55); }
+html.gamer select:focus, html.gamer input:focus { border-color: hsl(var(--hue) 90% 62%); box-shadow: 0 0 10px hsl(var(--hue) 90% 60% / .35); }
+html.gamer .status.online i { background: hsl(var(--hue) 90% 60%); box-shadow: 0 0 calc(4px + var(--glow) * 8px) hsl(var(--hue) 95% 60%); }
+html.gamer .version { color: hsl(var(--hue) 50% 70%); }
+html.gamer .folders::-webkit-scrollbar-thumb, html.gamer .items.capped::-webkit-scrollbar-thumb { background: hsl(var(--hue) 70% 45% / .7); }
+html.gamer .ghost { box-shadow: 0 14px 34px rgba(0,0,0,.55), 0 0 0 1px hsl(var(--hue) 90% 60% / .8), 0 0 24px hsl(var(--hue) 90% 60% / .35); }
+
 /* ---------- motion ---------- */
 @keyframes lift { from { box-shadow: 0 2px 6px rgba(0,0,0,.3); } }
 @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.45); } 100% { transform: scale(1); } }
@@ -219,4 +340,8 @@ dialog p:empty { display: none; }
 @keyframes drop-in { from { opacity: 0; transform: translateY(-4px); } }
 @keyframes pop { from { opacity: 0; transform: scale(.96); } }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+  /* keep Gamer mode colorful but still, never flashing */
+  html.gamer { animation: none !important; --hue: 260; --glow: 0.5; }
+}

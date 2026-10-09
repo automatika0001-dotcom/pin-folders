@@ -16,13 +16,15 @@ pin-folders/
 - Minimize either one and both minimize. Restore either and both come back.
 - Close either one (panel X, Alt+F4, or Discord's own X) and both close. Discord's X normally only hides it to the tray; Pin Folders treats that as "closed" and fully quits Discord. Set `closeDiscordCompletely` to `false` in `app/config.json` if you'd rather it just hide.
 - The split-window button in the title bar re-fits both windows if anything gets out of place.
-- Folders: create, rename, delete, drag to reorder. Drag messages between folders or right-click them. Click a message to jump to it in Discord. Search across everything.
+- Folders: create, rename, delete, color, put folders inside folders (up to 5 levels), drag to reorder or nest. Drag messages between folders or right-click them. Click a message to jump to it in Discord. Search across everything.
 
 **What people do in Discord**
 
 - Right-click any message, then **Apps → Add to folder**, and pick a folder (or make a new one).
 - `/importpins` in a channel copies its existing pins into a folder.
 - `/folder create` and `/folder list`.
+
+**Gamer mode**: the small switch in the panel's title bar turns on a slow RGB glow. It's a personal setting, remembered per PC.
 
 The bot shows as **offline** in the member list. That's normal: Discord calls it over the web only when someone uses it, which is what lets it run free. Discord itself is never modified; the panel only moves and resizes Discord's window.
 

@@ -8,6 +8,8 @@ const GUILD_CACHE_MS = 10 * 60 * 1000;
 const PENDING_TTL_MS = 15 * 60 * 1000;
 const CHANNEL_CACHE_MS = 10 * 60 * 1000;
 const PIN_CACHE_MS = 20 * 1000;
+const COLORS = ['blurple', 'green', 'yellow', 'orange', 'red', 'pink', 'purple', 'teal'];
+const MAX_DEPTH = 5;
 
 export class Hub extends DurableObject {
   constructor(ctx, env) {
@@ -22,6 +24,10 @@ export class Hub extends DurableObject {
       UNIQUE (guild_id, message_id))`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS pending (key TEXT PRIMARY KEY, data TEXT NOT NULL, created_at INTEGER)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)`);
+    // v1.2: folder colors and folders inside folders.
+    const cols = new Set(this.sql.exec('PRAGMA table_info(folders)').toArray().map((c) => c.name));
+    if (!cols.has('color')) this.sql.exec('ALTER TABLE folders ADD COLUMN color TEXT');
+    if (!cols.has('parent_id')) this.sql.exec('ALTER TABLE folders ADD COLUMN parent_id TEXT');
     // Keep-alive pings are answered without waking the object up.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"op":"ping"}', '{"type":"pong"}'));
   }
@@ -77,10 +83,17 @@ export class Hub extends DurableObject {
     const guilds = await this.guilds();
     const ids = new Set(guilds.map((g) => g.id));
     const folders = this.sql
-      .exec('SELECT id, guild_id, name, position FROM folders ORDER BY position')
+      .exec('SELECT id, guild_id, name, position, color, parent_id FROM folders ORDER BY position')
       .toArray()
       .filter((f) => ids.has(f.guild_id))
-      .map((f) => ({ id: f.id, guildId: f.guild_id, name: f.name, position: f.position }));
+      .map((f) => ({
+        id: f.id,
+        guildId: f.guild_id,
+        name: f.name,
+        position: f.position,
+        color: f.color || null,
+        parentId: f.parent_id || null,
+      }));
     const items = this.sql
       .exec('SELECT id, guild_id, folder_id, data FROM items')
       .toArray()
@@ -131,7 +144,16 @@ export class Hub extends DurableObject {
     switch (m.op) {
       case 'createFolder':
         await this.requireGuild(m.guildId);
-        return this.createFolder(m.guildId, m.name, m.by || null);
+        this.createFolder(m.guildId, m.name, m.by || null, m.parentId || null);
+        return;
+      case 'setFolderColor': {
+        if (!this.getFolder(m.id)) throw new Error('Folder not found');
+        const color = m.color && COLORS.includes(m.color) ? m.color : null;
+        this.sql.exec('UPDATE folders SET color = ? WHERE id = ?', color, m.id);
+        return;
+      }
+      case 'moveFolder':
+        return this.moveFolder(m);
       case 'renameFolder': {
         const name = cleanName(m.name);
         if (!name) throw new Error('Folder name cannot be empty');
@@ -139,11 +161,15 @@ export class Hub extends DurableObject {
         this.sql.exec('UPDATE folders SET name = ? WHERE id = ?', name, m.id);
         return;
       }
-      case 'deleteFolder':
-        if (!this.getFolder(m.id)) throw new Error('Folder not found');
+      case 'deleteFolder': {
+        const f = this.getFolder(m.id);
+        if (!f) throw new Error('Folder not found');
+        // Messages go back to No Label; subfolders move up one level (nothing is lost).
         this.sql.exec('UPDATE items SET folder_id = NULL WHERE folder_id = ?', m.id);
+        this.sql.exec('UPDATE folders SET parent_id = ? WHERE parent_id = ?', f.parent_id || null, m.id);
         this.sql.exec('DELETE FROM folders WHERE id = ?', m.id);
         return;
+      }
       case 'reorderFolders': {
         if (!Array.isArray(m.ids)) throw new Error('Bad order');
         const rank = new Map(m.ids.map((id, i) => [String(id), i]));
@@ -165,6 +191,9 @@ export class Hub extends DurableObject {
       case 'removeItem':
         this.sql.exec('DELETE FROM items WHERE id = ?', m.id);
         return;
+      // Re-send the current state to one panel (after a refused change).
+      case 'sync':
+        return { quiet: true, reply: await this.snapshot() };
       // ----- current channel's pins (answered only to the asking panel) -----
       case 'viewChannel':
         return { quiet: true, reply: await this.viewChannel(m) };
@@ -262,10 +291,18 @@ export class Hub extends DurableObject {
     return this.sql.exec('SELECT * FROM folders WHERE guild_id = ? ORDER BY position', guildId).toArray();
   }
 
-  createFolder(guildId, name, createdBy) {
+  createFolder(guildId, name, createdBy, parentId = null) {
     const clean = cleanName(name);
     if (!clean) throw new Error('Folder name cannot be empty');
-    const existing = this.foldersFor(guildId).find((f) => f.name.toLowerCase() === clean.toLowerCase());
+    if (parentId) {
+      const parent = this.getFolder(parentId);
+      if (!parent || parent.guild_id !== guildId) throw new Error('Parent folder not found');
+      if (this.depthOf(parentId) >= MAX_DEPTH) throw new Error(`Folders can be nested ${MAX_DEPTH} levels deep at most`);
+    }
+    // Same name in the same place = the same folder.
+    const existing = this.foldersFor(guildId).find(
+      (f) => (f.parent_id || null) === parentId && f.name.toLowerCase() === clean.toLowerCase()
+    );
     if (existing) return existing;
     const max = this.sql.exec('SELECT MAX(position) AS p FROM folders WHERE guild_id = ?', guildId).toArray()[0]?.p;
     const folder = {
@@ -275,12 +312,67 @@ export class Hub extends DurableObject {
       position: max == null ? 0 : max + 1,
       created_by: createdBy,
       created_at: Date.now(),
+      parent_id: parentId,
     };
     this.sql.exec(
-      'INSERT INTO folders (id, guild_id, name, position, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      folder.id, folder.guild_id, folder.name, folder.position, folder.created_by, folder.created_at
+      'INSERT INTO folders (id, guild_id, name, position, created_by, created_at, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      folder.id, folder.guild_id, folder.name, folder.position, folder.created_by, folder.created_at, folder.parent_id
     );
     return folder;
+  }
+
+  // How many folders deep this folder sits (top level = 1).
+  depthOf(id) {
+    let depth = 0;
+    for (let f = this.getFolder(id); f && depth < 50; f = f.parent_id ? this.getFolder(f.parent_id) : null) depth++;
+    return depth;
+  }
+
+  // Deepest chain of subfolders below this one (a folder alone = 1).
+  heightOf(id, guard = 0) {
+    if (guard > 50) return 1;
+    const kids = this.sql.exec('SELECT id FROM folders WHERE parent_id = ?', id).toArray();
+    return 1 + Math.max(0, ...kids.map((k) => this.heightOf(k.id, guard + 1)));
+  }
+
+  // Puts a folder inside another (or at the top level), optionally next to a sibling.
+  moveFolder(m) {
+    const f = this.getFolder(m.id);
+    if (!f) throw new Error('Folder not found');
+    const parentId = m.parentId || null;
+    if (parentId) {
+      const p = this.getFolder(parentId);
+      if (!p || p.guild_id !== f.guild_id) throw new Error('Folder not found');
+      for (let a = p; a; a = a.parent_id ? this.getFolder(a.parent_id) : null) {
+        if (a.id === f.id) throw new Error("A folder can't go inside itself");
+      }
+      if (this.depthOf(parentId) + this.heightOf(f.id) > MAX_DEPTH) {
+        throw new Error(`Folders can be nested ${MAX_DEPTH} levels deep at most`);
+      }
+    }
+    this.sql.exec('UPDATE folders SET parent_id = ? WHERE id = ?', parentId, f.id);
+
+    // New order among its new siblings.
+    const siblings = this.foldersFor(f.guild_id).filter((x) => (x.parent_id || null) === parentId && x.id !== f.id);
+    let at = siblings.length;
+    if (m.beforeId) {
+      const i = siblings.findIndex((x) => x.id === m.beforeId);
+      if (i >= 0) at = i;
+    } else if (m.afterId) {
+      const i = siblings.findIndex((x) => x.id === m.afterId);
+      if (i >= 0) at = i + 1;
+    }
+    siblings.splice(at, 0, f);
+    const base = siblings.length ? Math.min(...siblings.map((x) => x.position)) : 0;
+    siblings.forEach((x, i) => this.sql.exec('UPDATE folders SET position = ? WHERE id = ?', base + i, x.id));
+    this.normalizePositions(f.guild_id);
+  }
+
+  // Keeps positions unique across the server so ordering stays stable.
+  normalizePositions(guildId) {
+    this.foldersFor(guildId).forEach((x, i) => {
+      if (x.position !== i) this.sql.exec('UPDATE folders SET position = ? WHERE id = ?', i, x.id);
+    });
   }
 
   upsertItem(snap, folderId) {
@@ -298,14 +390,27 @@ export class Hub extends DurableObject {
   }
 
   // ---------- called by the Discord bot (RPC) ----------
+  // Folders in tree order, with nested names shown as "Parent / Child".
   foldersWithCounts(guildId) {
-    return this.sql
+    const rows = this.sql
       .exec(
-        `SELECT f.id, f.name, (SELECT COUNT(*) FROM items i WHERE i.folder_id = f.id) AS count
+        `SELECT f.id, f.name, f.parent_id, (SELECT COUNT(*) FROM items i WHERE i.folder_id = f.id) AS count
          FROM folders f WHERE f.guild_id = ? ORDER BY f.position`,
         guildId
       )
       .toArray();
+    const ids = new Set(rows.map((r) => r.id));
+    const out = [];
+    const walk = (parent, prefix, depth) => {
+      if (depth > MAX_DEPTH + 1) return;
+      for (const r of rows.filter((x) => (x.parent_id && ids.has(x.parent_id) ? x.parent_id : null) === parent)) {
+        const path = prefix ? `${prefix} / ${r.name}` : r.name;
+        out.push({ id: r.id, name: path, count: r.count });
+        walk(r.id, path, depth + 1);
+      }
+    };
+    walk(null, '', 1);
+    return out;
   }
 
   unsortedCount(guildId) {

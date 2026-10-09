@@ -50,7 +50,7 @@ function connect() {
       renderChannelPicker();
     } else if (m.type === 'error') {
       toast(m.message);
-      render(); // undo optimistic changes
+      send({ op: 'sync' }); // undo optimistic changes with the server's truth
     }
   };
   ws.onclose = () => {
@@ -193,10 +193,21 @@ function render() {
 
   const prevInboxScroll = root.dataset.inboxScroll ? Number(root.dataset.inboxScroll) : 0;
 
-  for (const f of guildFolders()) {
-    const its = all.filter((e) => e.folderId === f.id).sort(byNew);
-    if (query && !its.length) continue;
-    root.appendChild(folderEl(f, its));
+  const byFolder = new Map();
+  for (const e of all) if (e.folderId) (byFolder.get(e.folderId) || byFolder.set(e.folderId, []).get(e.folderId)).push(e);
+  const kids = folderChildren();
+
+  // Builds a folder and everything inside it. Returns null when a search hides it.
+  const build = (f, depth) => {
+    const own = (byFolder.get(f.id) || []).sort(byNew);
+    const children = depth < 12 ? (kids.get(f.id) || []).map((c) => build(c, depth + 1)).filter(Boolean) : [];
+    const total = own.length + children.reduce((n, c) => n + c.total, 0);
+    if (query && !total) return null;
+    return { el: folderEl(f, own, { children: children.map((c) => c.el), total, depth }), total };
+  };
+  for (const f of kids.get(null) || []) {
+    const b = build(f, 1);
+    if (b) root.appendChild(b.el);
   }
 
   // "No Label" sits at the bottom and shows 3 pins at a time; scroll for the rest.
@@ -239,6 +250,61 @@ function limitInbox(folder, restoreScroll = 0) {
   });
 }
 
+// ---------- folder tree helpers ----------
+const MAX_DEPTH = 5;
+const COLORS = [
+  ['blurple', 'Blurple'], ['green', 'Green'], ['yellow', 'Yellow'], ['orange', 'Orange'],
+  ['red', 'Red'], ['pink', 'Pink'], ['purple', 'Purple'], ['teal', 'Teal'],
+];
+
+/** Map of parentId (null = top level) -> child folders, in order. */
+function folderChildren() {
+  const list = guildFolders();
+  const ids = new Set(list.map((f) => f.id));
+  const kids = new Map();
+  for (const f of list) {
+    const p = f.parentId && ids.has(f.parentId) && f.parentId !== f.id ? f.parentId : null;
+    (kids.get(p) || kids.set(p, []).get(p)).push(f);
+  }
+  return kids;
+}
+
+function folderById(id) {
+  return state.folders.find((f) => f.id === id) || null;
+}
+
+function depthOf(id) {
+  let d = 0;
+  for (let f = folderById(id); f && d < 50; f = f.parentId ? folderById(f.parentId) : null) d++;
+  return d;
+}
+
+function heightOf(id, kids = folderChildren(), guard = 0) {
+  if (guard > 50) return 1;
+  return 1 + Math.max(0, ...(kids.get(id) || []).map((k) => heightOf(k.id, kids, guard + 1)));
+}
+
+function isInside(id, ancestorId) {
+  for (let f = folderById(id); f; f = f.parentId ? folderById(f.parentId) : null) if (f.id === ancestorId) return true;
+  return false;
+}
+
+/** All folders in tree order with "Parent / Child" labels (for menus). */
+function folderPaths() {
+  const kids = folderChildren();
+  const out = [];
+  const walk = (p, prefix, d) => {
+    if (d > 12) return;
+    for (const f of kids.get(p) || []) {
+      const path = prefix ? `${prefix} / ${f.name}` : f.name;
+      out.push({ folder: f, path, depth: d });
+      walk(f.id, path, d + 1);
+    }
+  };
+  walk(null, '', 1);
+  return out;
+}
+
 function renderGuilds() {
   const sel = $('#guild');
   const html = state.guilds.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
@@ -261,30 +327,47 @@ function renderChannelPicker() {
   sel.value = channelMode;
 }
 
-function folderEl(f, items) {
+function folderEl(f, items, opts = {}) {
   const isNoLabel = f.id === null;
   const key = f.id || 'nolabel';
+  const children = opts.children || [];
+  const total = opts.total ?? items.length;
   const el = document.createElement('div');
-  el.className = 'folder' + (isNoLabel ? ' nolabel' : '') + (collapsed.has(key) && !query ? ' collapsed' : '');
+  el.className =
+    'folder' +
+    (isNoLabel ? ' nolabel' : '') +
+    (f.color ? ` colored c-${f.color}` : '') +
+    (opts.depth > 1 ? ' sub' : '') +
+    (collapsed.has(key) && !query ? ' collapsed' : '');
   el.dataset.id = f.id || 'nolabel';
   const sub = isNoLabel && view.status === 'ok' && view.guildId === guildId ? `#${esc(view.channelName)}` : '';
   el.innerHTML = `
     <div class="folder-head" ${isNoLabel ? '' : 'data-draggable="1"'}>
       <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      ${isNoLabel ? '' : '<svg class="ficon" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.6l2 2.2h7.4A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></svg>'}
       <span class="name">${esc(f.name)}</span>
       ${sub ? `<span class="sub">${sub}</span>` : ''}
-      <span class="count">${items.length}</span>
+      <span class="count" title="${items.length} here${children.length ? `, ${total} including subfolders` : ''}">${total}</span>
       ${isNoLabel ? '' : '<button class="more" title="Folder options"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>'}
     </div>
-    <div class="items"></div>`;
+    <div class="folder-body"><div class="items"></div></div>`;
 
+  const body = el.querySelector('.folder-body');
   const list = el.querySelector('.items');
-  if (!items.length) list.innerHTML = emptyText(isNoLabel);
+  if (!items.length && !children.length) list.innerHTML = emptyText(isNoLabel);
+  if (!items.length && children.length) list.remove();
   for (const e of items) list.appendChild(itemEl(e));
+  if (children.length) {
+    const wrap = document.createElement('div');
+    wrap.className = 'subfolders';
+    for (const c of children) wrap.appendChild(c);
+    body.appendChild(wrap);
+  }
 
   const head = el.querySelector('.folder-head');
   head.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!isNoLabel) folderMenu(f, e.clientX, e.clientY);
   });
   head.querySelector('.more')?.addEventListener('click', (e) => {
@@ -378,16 +461,34 @@ function moveEntry(entry, targetId) {
   return true;
 }
 
-function reorder(movingId, targetId, after) {
-  const ids = guildFolders()
-    .map((f) => f.id)
-    .filter((id) => id !== movingId);
-  let at = ids.indexOf(targetId);
-  if (after) at++;
-  ids.splice(at, 0, movingId);
-  if (!send({ op: 'reorderFolders', guildId, ids })) return;
-  const rank = new Map(ids.map((id, i) => [id, i]));
-  state.folders = state.folders.map((f) => (rank.has(f.id) ? { ...f, position: rank.get(f.id) } : f));
+/** Puts a folder inside another (parentId) or at the top level (null), next to a sibling if given. */
+function moveFolderTo(id, parentId, ref = {}) {
+  const f = folderById(id);
+  if (!f) return false;
+  parentId = parentId || null;
+  if (parentId && (parentId === id || isInside(parentId, id))) {
+    toast("A folder can't go inside itself");
+    return false;
+  }
+  if (parentId && depthOf(parentId) + heightOf(id) > MAX_DEPTH) {
+    toast(`Folders can be nested ${MAX_DEPTH} levels deep at most`);
+    return false;
+  }
+  const sameSpot =
+    (f.parentId || null) === parentId && !ref.beforeId && !ref.afterId;
+  if (sameSpot) return false;
+  if (!send({ op: 'moveFolder', id, parentId, beforeId: ref.beforeId || null, afterId: ref.afterId || null })) return false;
+
+  // Show it right away; the server's answer follows within a moment.
+  let position = Math.max(0, ...state.folders.map((x) => x.position)) + 1;
+  if (ref.beforeId) position = (folderById(ref.beforeId)?.position ?? position) - 0.5;
+  else if (ref.afterId) position = (folderById(ref.afterId)?.position ?? position) + 0.5;
+  state.folders = state.folders.map((x) => (x.id === id ? { ...x, parentId, position } : x));
+  if (parentId) {
+    collapsed.delete(parentId);
+    saveCollapsed();
+  }
+  return true;
 }
 
 // ---------- tactile drag & drop (pointer based) ----------
@@ -487,13 +588,41 @@ function updateDropTarget(x, y) {
       saveCollapsed();
     }
   } else {
-    const targetId = folder.dataset.id;
-    if (targetId === 'nolabel' || targetId === drag.key) return folder.classList.remove('drop-before', 'drop-after');
-    const r = folder.getBoundingClientRect();
-    const after = y > r.top + r.height / 2;
-    folder.classList.toggle('drop-before', !after);
-    folder.classList.toggle('drop-after', after);
-    drag.target = { id: targetId, el: folder, after };
+    // Dragging a folder: top edge of a header = put it above, otherwise = put it inside.
+    const head = under?.closest?.('.folder-head');
+    const tf = head ? head.parentElement : folder;
+    for (const el of document.querySelectorAll('.drop-target, .drop-before, .drop-after')) {
+      if (el !== tf) el.classList.remove('drop-target', 'drop-before', 'drop-after');
+    }
+    if (!tf || drag.source.contains(tf)) return;
+    if (tf.dataset.id === 'nolabel') {
+      // Dropping on No Label = move to the top level, at the end.
+      tf.classList.add('drop-before');
+      drag.target = { mode: 'top', el: tf };
+      return;
+    }
+    let mode = 'inside';
+    if (head) {
+      const r = head.getBoundingClientRect();
+      const rel = (y - r.top) / r.height;
+      if (rel < 0.3) mode = 'before';
+      else if (rel > 0.7 && tf.classList.contains('collapsed')) mode = 'after';
+    }
+    tf.classList.toggle('drop-target', mode === 'inside');
+    tf.classList.toggle('drop-before', mode === 'before');
+    tf.classList.toggle('drop-after', mode === 'after');
+    drag.target = { mode, id: tf.dataset.id, el: tf };
+    // Hovering a collapsed folder opens it, so you can drop deeper.
+    if (mode === 'inside') {
+      if (drag.hoverTarget !== tf) {
+        drag.hoverTarget = tf;
+        drag.hoverSince = Date.now();
+      } else if (tf.classList.contains('collapsed') && Date.now() - drag.hoverSince > 700) {
+        tf.classList.remove('collapsed');
+        collapsed.delete(tf.dataset.id);
+        saveCollapsed();
+      }
+    }
   }
 }
 
@@ -529,20 +658,25 @@ function onDragEnd() {
     const entry = findEntry(d.key);
     if (entry) moved = moveEntry(entry, target.id);
   } else if (target && d.kind === 'folder') {
-    reorder(d.key, target.id, target.after);
-    moved = true;
+    if (target.mode === 'inside') moved = moveFolderTo(d.key, target.id);
+    else if (target.mode === 'top') moved = moveFolderTo(d.key, null);
+    else {
+      const t = folderById(target.id);
+      moved = t && moveFolderTo(d.key, t.parentId || null, target.mode === 'before' ? { beforeId: t.id } : { afterId: t.id });
+    }
+    if (moved && target.mode === 'inside') receivedFolder = target.id;
   }
 
   // Fly into the folder, or spring back to where it came from.
   ghost.classList.remove('lift');
   ghost.classList.add('settle');
-  if (moved && d.kind === 'item') {
+  if (moved && (d.kind === 'item' || target.mode === 'inside')) {
     const h = target.el.querySelector('.folder-head').getBoundingClientRect();
     ghost.style.transform = `translate(${h.left + 12}px, ${h.top}px) scale(0.3)`;
     ghost.style.opacity = '0';
   } else if (moved) {
     const r = target.el.getBoundingClientRect();
-    ghost.style.transform = `translate(${r.left}px, ${target.after ? r.bottom - 30 : r.top}px) scale(1)`;
+    ghost.style.transform = `translate(${r.left}px, ${target.mode === 'after' ? r.bottom - 30 : r.top}px) scale(1)`;
     ghost.style.opacity = '0';
   } else {
     ghost.style.transform = `translate(${d.origin.left}px, ${d.origin.top}px) scale(1)`;
@@ -613,6 +747,20 @@ function openMenu(x, y, items) {
   for (const e of items) {
     if (e === '-') {
       m.appendChild(document.createElement('hr'));
+    } else if (e.swatches) {
+      const row = document.createElement('div');
+      row.className = 'swatches';
+      for (const [key, name] of [[null, 'No color'], ...COLORS]) {
+        const b = document.createElement('button');
+        b.className = 'sw' + (key ? ` c-${key}` : ' none') + ((e.current || null) === key ? ' on' : '');
+        b.title = name;
+        b.onclick = () => {
+          closeMenu();
+          e.onPick(key);
+        };
+        row.appendChild(b);
+      }
+      m.appendChild(row);
     } else if (e.label && !e.action) {
       const d = document.createElement('div');
       d.className = 'label';
@@ -650,15 +798,29 @@ document.addEventListener('keydown', (e) => {
 window.addEventListener('blur', closeMenu);
 
 function folderMenu(f, x, y) {
+  const canNest = depthOf(f.id) < MAX_DEPTH;
   openMenu(x, y, [
+    ...(canNest ? [{ text: 'New folder inside', action: () => newFolder(f) }] : []),
     { text: 'Rename folder', action: () => renameFolder(f) },
+    { label: 'Color' },
+    { swatches: true, current: f.color, onPick: (color) => setFolderColor(f, color) },
+    ...(f.parentId ? ['-', { text: 'Move to top level', action: () => moveFolderTo(f.id, null) && render() }] : []),
+    '-',
     { text: 'Delete folder', danger: true, action: () => deleteFolder(f) },
   ]);
 }
 
+function setFolderColor(f, color) {
+  if ((f.color || null) === color) return;
+  if (!send({ op: 'setFolderColor', id: f.id, color })) return;
+  state.folders = state.folders.map((x) => (x.id === f.id ? { ...x, color } : x));
+  render();
+}
+
 function itemMenu(entry, x, y) {
-  const folders = guildFolders().filter((f) => f.id !== entry.folderId);
-  const moveTo = folders.map((f) => ({ text: f.name, action: () => moveEntry(entry, f.id) && render() }));
+  const moveTo = folderPaths()
+    .filter((p) => p.folder.id !== entry.folderId)
+    .map((p) => ({ text: p.path, action: () => moveEntry(entry, p.folder.id) && render() }));
   openMenu(x, y, [
     { text: 'Jump to message', action: () => pf.openMessage(entry.data) },
     ...(moveTo.length ? ['-', { label: 'Move to' }, ...moveTo] : []),
@@ -686,10 +848,14 @@ function ask({ title, text = '', value = null, ok = 'OK', danger = false }) {
   });
 }
 
-async function newFolder() {
+async function newFolder(parent = null) {
   if (!guildId) return toast('No server selected');
-  const name = await ask({ title: 'New folder', value: '', ok: 'Create' });
-  if (name) send({ op: 'createFolder', guildId, name });
+  const name = await ask({ title: parent ? `New folder inside "${parent.name}"` : 'New folder', value: '', ok: 'Create' });
+  if (!name) return;
+  if (send({ op: 'createFolder', guildId, name, parentId: parent ? parent.id : null }) && parent) {
+    collapsed.delete(parent.id);
+    saveCollapsed();
+  }
 }
 async function renameFolder(f) {
   const name = await ask({ title: 'Rename folder', value: f.name, ok: 'Save' });
@@ -698,7 +864,7 @@ async function renameFolder(f) {
 async function deleteFolder(f) {
   const yes = await ask({
     title: `Delete "${f.name}"?`,
-    text: 'Its messages go back to No Label. This is shared with everyone.',
+    text: 'Its messages go back to No Label and any folders inside it move up one level. This is shared with everyone.',
     ok: 'Delete',
     danger: true,
   });
@@ -758,7 +924,20 @@ pf.onDiscordStatus((s) => {
 $('#btn-min').onclick = () => pf.minimize();
 $('#btn-close').onclick = () => pf.close();
 $('#btn-snap').onclick = () => pf.snap();
-$('#btn-new').onclick = newFolder;
+$('#btn-new').onclick = () => newFolder();
+
+// Gamer mode: a slow RGB glow through the UI. Personal setting, remembered on this PC.
+function setGamer(on) {
+  document.documentElement.classList.toggle('gamer', on);
+  $('#gamer').setAttribute('aria-checked', String(on));
+  try {
+    localStorage.setItem('gamer', on ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
+$('#gamer').onclick = () => setGamer(!document.documentElement.classList.contains('gamer'));
+setGamer(localStorage.getItem('gamer') === '1');
 $('#guild').onchange = (e) => {
   setGuild(e.target.value, true);
   refreshView();
