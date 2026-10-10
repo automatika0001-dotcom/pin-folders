@@ -242,13 +242,25 @@ function render() {
   }
 
   // "No Label" sits at the bottom and shows 3 pins at a time; scroll for the rest.
-  // Newest arrival on top: just pinned, or just taken out of a folder. Pins without a
-  // pin date keep Discord's order (most recently pinned first).
-  const arrived = (e) => e.data.unlabeledAt || e.data.pinnedAt || (e.kind === 'filed' ? e.data.addedAt : 0) || 0;
+  // Same order as Discord's pinned messages: most recently pinned on top.
+  // Discord's live pin list is the source of truth (it also covers messages that
+  // were filed before pin dates were saved). Messages no longer pinned go last.
+  const live = new Map(
+    (view.status === 'ok' && view.guildId === guildId ? view.pins : []).map((p, i) => [p.messageId, { at: p.pinnedAt || null, i }])
+  );
+  const pinKey = (e) => {
+    const l = live.get(e.data.messageId);
+    return { pinned: !!l || !!e.data.pinnedAt, at: l?.at ?? e.data.pinnedAt ?? null, i: l ? l.i : Infinity };
+  };
   const noLabel = all
     .filter((e) => !e.folderId)
-    .map((e, i) => [e, i])
-    .sort((a, b) => arrived(b[0]) - arrived(a[0]) || a[1] - b[1])
+    .map((e) => [e, pinKey(e)])
+    .sort(([a, ka], [b, kb]) => {
+      if (ka.pinned !== kb.pinned) return ka.pinned ? -1 : 1;
+      if (ka.at && kb.at && ka.at !== kb.at) return kb.at - ka.at;
+      if (ka.i !== kb.i) return ka.i - kb.i; // Discord's own order when dates are missing
+      return (b.data.createdAt || 0) - (a.data.createdAt || 0);
+    })
     .map(([e]) => e);
   const inbox = folderEl({ id: null, name: 'No Label' }, noLabel);
   root.appendChild(inbox);
