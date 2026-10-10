@@ -100,6 +100,9 @@ jobs:
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "Pin Folders $TAG" --verify-tag
           fi
-          gh release upload "$TAG" "${FILES[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          # Same installer under a name that never changes, so this link always gets the newest one:
+          # https://github.com/<owner>/<repo>/releases/latest/download/PinFolders-Setup.exe
+          cp "PinFolders-Setup-$VER.exe" "PinFolders-Setup.exe"
+          gh release upload "$TAG" "${FILES[@]}" "PinFolders-Setup.exe" --repo "$GITHUB_REPOSITORY" --clobber
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
           echo "Published $TAG with:"; gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
