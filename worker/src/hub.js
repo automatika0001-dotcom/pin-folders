@@ -7,7 +7,7 @@ import { fetchAllPins, fetchChannels, snapshotOf } from './discordApi.js';
 const GUILD_CACHE_MS = 10 * 60 * 1000;
 const PENDING_TTL_MS = 15 * 60 * 1000;
 const CHANNEL_CACHE_MS = 10 * 60 * 1000;
-const PIN_CACHE_MS = 20 * 1000;
+const PIN_CACHE_MS = 900; // panels check about once a second; one Discord call per channel per second at most
 const COLORS = ['blurple', 'green', 'yellow', 'orange', 'red', 'pink', 'purple', 'teal'];
 const MAX_DEPTH = 5;
 
@@ -215,6 +215,14 @@ export class Hub extends DurableObject {
         const changed = after.length !== before.size || after.some((g) => !before.has(g.id));
         return changed ? undefined : { quiet: true };
       }
+      case 'devPin': {
+        if (!this.env.DEV_FIXTURES) throw new Error('Unknown operation');
+        const row = this.sql.exec("SELECT value FROM meta WHERE key = 'devpins'").toArray()[0];
+        const extra = row ? JSON.parse(row.value) : {};
+        (extra[m.channelId] ||= []).unshift(m.message);
+        this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('devpins', ?)", JSON.stringify(extra));
+        return { quiet: true };
+      }
       // Re-send the current state to one panel (after a refused change).
       case 'sync':
         return { quiet: true, reply: await this.snapshot() };
@@ -244,14 +252,43 @@ export class Hub extends DurableObject {
 
   async pinsFor(guildId, channel, force = false) {
     this.pinCache ||= new Map();
+    this.pinFetches ||= new Map();
     const hit = this.pinCache.get(channel.id);
-    if (!force && hit && Date.now() - hit.at < PIN_CACHE_MS) return hit.pins;
-    const raw = this.env.DEV_FIXTURES
-      ? JSON.parse(this.env.DEV_FIXTURES).pins?.[channel.id] || []
-      : await fetchAllPins(channel.id, this.env.DISCORD_TOKEN);
-    const pins = raw.map((m) => snapshotOf(m, { guildId, channelId: channel.id, channelName: channel.name }, null));
-    this.pinCache.set(channel.id, { at: Date.now(), pins });
-    return pins;
+    const fresh = hit && Date.now() - hit.at < PIN_CACHE_MS;
+    if (hit && (fresh || Date.now() < (hit.retryAt || 0)) && !(force && !hit.retryAt)) return hit.pins;
+    // Several panels asking at once share one Discord call.
+    if (this.pinFetches.has(channel.id)) return this.pinFetches.get(channel.id);
+    const job = (async () => {
+      try {
+        const raw = this.env.DEV_FIXTURES
+          ? this.devPins(channel.id)
+          : await fetchAllPins(channel.id, this.env.DISCORD_TOKEN);
+        const pins = raw.map((m) => snapshotOf(m, { guildId, channelId: channel.id, channelName: channel.name }, null));
+        this.pinCache.set(channel.id, { at: Date.now(), pins });
+        return pins;
+      } catch (e) {
+        // Discord asked us to slow down: keep showing what we have and wait it out.
+        if (e.status === 429 && hit) {
+          this.pinCache.set(channel.id, { ...hit, retryAt: Date.now() + (e.retryAfter || 2) * 1000 });
+          return hit.pins;
+        }
+        throw e;
+      }
+    })();
+    // Registered before it can finish, and only ever removed by itself.
+    this.pinFetches.set(channel.id, job);
+    job.then(
+      () => this.pinFetches.get(channel.id) === job && this.pinFetches.delete(channel.id),
+      () => this.pinFetches.get(channel.id) === job && this.pinFetches.delete(channel.id)
+    );
+    return job;
+  }
+
+  // Local testing only: fixture pins plus any added with the devPin op.
+  devPins(channelId) {
+    const row = this.sql.exec("SELECT value FROM meta WHERE key = 'devpins'").toArray()[0];
+    const extra = row ? JSON.parse(row.value) : {};
+    return [...(extra[channelId] || []), ...(JSON.parse(this.env.DEV_FIXTURES).pins?.[channelId] || [])];
   }
 
   // Works out which channel Discord is showing from its window title,

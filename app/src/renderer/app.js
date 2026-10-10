@@ -81,33 +81,54 @@ function setStatus(s) {
 setInterval(() => ws && ws.readyState === 1 && ws.send('{"op":"ping"}'), 25000);
 
 // ---------- current channel ("No Label") ----------
-function refreshView(force = false) {
+// viewReq changes only when the channel being shown changes (switching in Discord or
+// in "Pins from"). The once-a-second check reuses it, so slow answers are never dropped.
+function refreshView(force = false, quiet = false) {
   if (!ws || ws.readyState !== 1) return;
-  const reqId = ++viewReq;
+  const reqId = viewReq;
   if (channelMode === 'auto') {
     if (!discordTitle) {
-      view = { ...view, status: 'nomatch' };
-      return render();
+      if (view.status !== 'nomatch') {
+        view = { ...view, status: 'nomatch' };
+        render();
+      }
+      return;
     }
-    if (view.status !== 'ok') view = { ...view, status: 'loading' };
+    if (!quiet && view.status !== 'ok') view = { ...view, status: 'loading' };
     ws.send(JSON.stringify({ op: 'viewChannel', reqId, title: discordTitle, force }));
   } else {
-    if (view.channelId !== channelMode) view = { ...view, status: 'loading', pins: [] };
+    if (!quiet && view.channelId !== channelMode) view = { ...view, status: 'loading', pins: [] };
     ws.send(JSON.stringify({ op: 'viewChannel', reqId, guildId, channelId: channelMode, force }));
   }
-  render();
+  if (!quiet) render();
 }
 
+// Something different is being shown: forget answers about the previous channel.
+function switchView(force = false) {
+  viewReq++;
+  refreshView(force);
+}
+
+// Check the open channel's pins about once a second while the panel is on screen,
+// so a newly pinned message shows up under No Label right away.
+setInterval(() => {
+  if (document.visibilityState === 'visible' && !drag) refreshView(false, true);
+}, 1000);
+
 function onChannelView(m) {
-  if (m.reqId !== viewReq) return; // an older answer
+  if (m.reqId !== viewReq) return; // an answer about a channel we've since left
   if (!m.ok) {
     const status = m.reason === 'no-match' ? 'nomatch' : m.reason === 'no-channel' ? 'nochannel' : 'error';
+    if (view.status === status && view.reason === m.reason && (view.guildId || null) === (m.guildId || null)) return;
     view = { status, reason: m.reason, pins: [], guildId: m.guildId || null, channelId: null, channelName: null };
     if (status === 'nochannel' && channelMode === 'auto' && m.guildId && m.guildId !== guildId) setGuild(m.guildId, false);
     renderChannelPicker();
     return render();
   }
-  view = { status: 'ok', guildId: m.guildId, channelId: m.channelId, channelName: m.channelName, pins: m.pins || [], reason: '' };
+  const sig = (v) => `${v.status}|${v.guildId}|${v.channelId}|` + (v.pins || []).map((p) => p.messageId + ':' + (p.content || '').length).join(',');
+  const next = { status: 'ok', guildId: m.guildId, channelId: m.channelId, channelName: m.channelName, pins: m.pins || [], reason: '' };
+  if (sig(next) === sig(view)) return;
+  view = next;
   if (inviteChecks.length) {
     inviteChecks.forEach(clearTimeout);
     inviteChecks = [];
@@ -136,9 +157,8 @@ function setGuild(id, byUser) {
 
 pf.onDiscordTitle((t) => {
   discordTitle = t || '';
-  if (channelMode === 'auto') refreshView();
+  if (channelMode === 'auto') switchView();
 });
-setInterval(() => refreshView(), 30000); // pick up newly pinned messages
 
 // ---------- data shaping ----------
 function guildFolders() {
@@ -506,8 +526,9 @@ function moveEntry(entry, targetId) {
     if (!send({ op: 'fileFromChannel', guildId, channelId: entry.data.channelId, messageId: entry.data.messageId, folderId: toFolder })) return false;
     state.items = [...state.items, { ...entry.data, id: 'tmp:' + entry.data.messageId, folderId: toFolder, addedAt: Date.now() }];
   } else if (!toFolder) {
-    if (!send({ op: 'removeItem', id: entry.data.id })) return false;
-    state.items = state.items.filter((i) => i.id !== entry.data.id);
+    // Out of every folder = back to No Label (kept, from any channel), never lost.
+    if (!send({ op: 'moveItem', id: entry.data.id, folderId: null })) return false;
+    state.items = state.items.map((i) => (i.id === entry.data.id ? { ...i, folderId: null } : i));
   } else {
     if (!send({ op: 'moveItem', id: entry.data.id, folderId: toFolder })) return false;
     state.items = state.items.map((i) => (i.id === entry.data.id ? { ...i, folderId: toFolder } : i));
@@ -880,7 +901,7 @@ function itemMenu(entry, x, y) {
     { text: 'Jump to message', action: () => pf.openMessage(entry.data) },
     ...(moveTo.length ? ['-', { label: 'Move to' }, ...moveTo] : []),
     ...(entry.kind === 'filed'
-      ? ['-', { text: 'Back to No Label', danger: true, action: () => moveEntry(entry, 'nolabel') && render() }]
+      ? ['-', { text: 'Move to No Label', action: () => moveEntry(entry, 'nolabel') && render() }]
       : []),
   ]);
 }
@@ -996,12 +1017,12 @@ $('#gamer').onclick = () => setGamer(!document.documentElement.classList.contain
 setGamer(localStorage.getItem('gamer') === '1');
 $('#guild').onchange = (e) => {
   setGuild(e.target.value, true);
-  refreshView();
+  switchView();
 };
 $('#channel').onchange = (e) => {
   channelMode = e.target.value;
   view = { status: 'loading', pins: [], guildId: null, channelId: null, channelName: null, reason: '' };
-  refreshView(true);
+  switchView(true);
 };
 $('#search').oninput = (e) => {
   query = e.target.value.trim();

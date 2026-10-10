@@ -302,7 +302,7 @@ function tick() {
   missingSince = null;
 
   // Tell the panel which channel Discord is showing (from the window title).
-  if (++titleTick % 5 === 0) {
+  if (++titleTick % 2 === 0) { // every 0.2s (was 0.5s)
     const title = dw.title(discord);
     if (title && title !== lastTitle) {
       lastTitle = title;

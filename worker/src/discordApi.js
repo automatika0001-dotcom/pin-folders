@@ -11,6 +11,7 @@ export async function discordGet(path, token) {
         : `Discord returned ${res.status}`
     );
     err.status = res.status;
+    if (res.status === 429) err.retryAfter = Number(res.headers.get('retry-after')) || 2;
     throw err;
   }
   return res.json();
