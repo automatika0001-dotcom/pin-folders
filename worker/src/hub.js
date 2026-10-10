@@ -295,10 +295,10 @@ export class Hub extends DurableObject {
   // Works out which channel Discord is showing from its window title,
   // e.g. "#general | My Server - Discord".
   async resolveTitle(title) {
-    const t = String(title || '').toLowerCase();
+    const t = norm(title);
     if (!t) return null;
     const guilds = [...(await this.guilds())].sort((a, b) => b.name.length - a.name.length);
-    const named = guilds.find((g) => t.includes(g.name.toLowerCase()));
+    const named = guilds.find((g) => t.includes(norm(g.name)));
     // Titles look like "#channel | Server Name - Discord". If a server name is there
     // and it isn't one the bot is in, don't guess: it's a server without the bot.
     const parts = t.replace(/\s+-\s+discord\s*$/, '').split(/\s+\|\s+/);
@@ -308,9 +308,9 @@ export class Hub extends DurableObject {
     for (const g of candidates) {
       const chans = await this.channelsFor(g.id);
       const byHash = chans
-        .filter((c) => t.includes('#' + c.name.toLowerCase()))
+        .filter((c) => t.includes('#' + norm(c.name)))
         .sort((a, b) => b.name.length - a.name.length)[0];
-      const ch = byHash || chans.find((c) => segments.includes(c.name.toLowerCase()));
+      const ch = byHash || chans.find((c) => segments.includes(norm(c.name)));
       if (ch) return { guildId: g.id, channel: ch };
     }
     // The server has the bot, but this channel isn't one it can see.
@@ -564,6 +564,19 @@ export class Hub extends DurableObject {
     await this.broadcast();
     return { added, skipped: snaps.length - added, folderName: folder.name };
   }
+}
+
+// Compares names the way people read them: ignores letter case, apostrophe and
+// quote styles (’ vs '), odd spaces and Unicode look-alikes.
+function norm(s) {
+  return String(s ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[\u2018\u2019\u201A\u201B\u02BC\u0060\u00B4]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function cleanName(name) {

@@ -218,6 +218,14 @@ function render() {
     return;
   }
 
+  // Discord is on a server that doesn't have the bot: show none of another server's folders.
+  const foreign = foreignServer();
+  if (foreign) {
+    root.innerHTML = `<div class="empty-state"><strong>No folders for ${esc(foreign)}</strong>Each server has its own folders. Add Pin Folders to this server with the button above to start sorting its pins.</div>`;
+    seenKeys = null;
+    return;
+  }
+
   const all = entries().filter((e) => matches(e.data));
   const byNew = (a, b) => (b.data.addedAt || b.data.createdAt || 0) - (a.data.addedAt || a.data.createdAt || 0);
   const nextKeys = new Set(all.map((e) => e.key));
@@ -312,9 +320,14 @@ function titleServerName(title) {
   return name && !name.startsWith('#') && !name.startsWith('@') ? name : null;
 }
 
+/** Name of the server Discord is showing when the bot isn't in it (null otherwise). */
+function foreignServer() {
+  return channelMode === 'auto' && view.status === 'nomatch' ? titleServerName(discordTitle) : null;
+}
+
 function updateInvite() {
   const box = $('#invite');
-  const server = channelMode === 'auto' && view.status === 'nomatch' ? titleServerName(discordTitle) : null;
+  const server = foreignServer();
   const show = !!state.invite && !!server && ws && ws.readyState === 1;
   box.classList.toggle('hidden', !show);
   if (show) $('#invite-server').textContent = server;
@@ -402,8 +415,18 @@ function renderGuilds() {
     sel.innerHTML = html;
     sel.dataset.html = html;
   }
-  sel.value = guildId || '';
-  sel.disabled = state.guilds.length < 2;
+  const foreign = foreignServer();
+  sel.querySelector('option[data-foreign]')?.remove();
+  if (foreign) {
+    const o = document.createElement('option');
+    o.dataset.foreign = '1';
+    o.value = '';
+    o.textContent = `${foreign} (no Pin Folders bot)`;
+    sel.prepend(o);
+    sel.dataset.html = '';
+  }
+  sel.value = foreign ? '' : guildId || '';
+  sel.disabled = state.guilds.length < 2 && !foreign;
 }
 
 function renderChannelPicker() {
@@ -944,6 +967,7 @@ function ask({ title, text = '', value = null, ok = 'OK', danger = false }) {
 }
 
 async function newFolder(parent = null) {
+  if (foreignServer()) return toast('Add Pin Folders to this server first');
   if (!guildId) return toast('No server selected');
   const name = await ask({ title: parent ? `New folder inside "${parent.name}"` : 'New folder', value: '', ok: 'Create' });
   if (!name) return;
@@ -1035,6 +1059,7 @@ function setGamer(on) {
 $('#gamer').onclick = () => setGamer(!document.documentElement.classList.contains('gamer'));
 setGamer(localStorage.getItem('gamer') === '1');
 $('#guild').onchange = (e) => {
+  if (!e.target.value) return renderGuilds();
   setGuild(e.target.value, true);
   switchView();
 };
