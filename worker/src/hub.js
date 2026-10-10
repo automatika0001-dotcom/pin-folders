@@ -10,10 +10,12 @@ const CHANNEL_CACHE_MS = 10 * 60 * 1000;
 const PIN_CACHE_MS = 900; // panels check about once a second; one Discord call per channel per second at most
 const COLORS = ['blurple', 'green', 'yellow', 'orange', 'red', 'pink', 'purple', 'teal'];
 const MAX_DEPTH = 5;
+export const SERVER_VERSION = '1.3.5';
 
 export class Hub extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.startedAt = new Date().toISOString();
     this.sql = ctx.storage.sql;
     this.sql.exec(`CREATE TABLE IF NOT EXISTS folders (
       id TEXT PRIMARY KEY, guild_id TEXT NOT NULL, name TEXT NOT NULL,
@@ -224,6 +226,9 @@ export class Hub extends DurableObject {
         this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('devpins', ?)", JSON.stringify(extra));
         return { quiet: true };
       }
+      // Which code this server is running (for troubleshooting).
+      case 'version':
+        return { quiet: true, reply: { type: 'version', version: SERVER_VERSION, startedAt: this.startedAt } };
       // Re-send the current state to one panel (after a refused change).
       case 'sync':
         return { quiet: true, reply: await this.snapshot() };

@@ -3,7 +3,7 @@
 //   GET  /ws?key=...    live connection for the panel app
 //   POST /interactions  Discord sends commands / menu clicks here
 //   GET  /setup?key=... registers the bot's commands with Discord (run once)
-import { Hub } from './hub.js';
+import { Hub, SERVER_VERSION } from './hub.js';
 import { handleInteraction, registerCommands } from './bot.js';
 
 export { Hub };
@@ -43,7 +43,7 @@ export default {
     const missing = REQUIRED.filter((k) => !env[k]);
     const text = missing.length
       ? `Pin Folders server is running, but these settings are missing:\n\n${missing.join('\n')}\n\nAdd them in Cloudflare: Worker > Settings > Variables and Secrets (type: Secret).`
-      : 'Pin Folders server is running. All settings are present.';
+      : `Pin Folders server is running. All settings are present. (server ${SERVER_VERSION})`;
     return new Response(text, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
   },
 };
