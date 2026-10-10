@@ -32,7 +32,7 @@ export async function fetchAllPins(channelId, token) {
       throw e;
     }
     const items = body.items || [];
-    out.push(...items.map((x) => x.message));
+    out.push(...items.map((x) => ({ ...x.message, pinned_at: x.pinned_at })));
     if (!body.has_more || !items.length) break;
     before = items[items.length - 1].pinned_at;
   }
@@ -71,6 +71,7 @@ export function snapshotOf(m, { guildId, channelId, channelName }, addedBy) {
       contentType: a.content_type || null,
     })),
     createdAt: Date.parse(m.timestamp) || Date.now(),
+    pinnedAt: Date.parse(m.pinned_at) || null, // when it was pinned (newer Discord API only)
     addedBy,
     addedAt: Date.now(),
   };

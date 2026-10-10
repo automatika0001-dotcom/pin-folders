@@ -242,7 +242,14 @@ function render() {
   }
 
   // "No Label" sits at the bottom and shows 3 pins at a time; scroll for the rest.
-  const noLabel = all.filter((e) => !e.folderId).sort(byNew);
+  // Newest arrival on top: just pinned, or just taken out of a folder. Pins without a
+  // pin date keep Discord's order (most recently pinned first).
+  const arrived = (e) => e.data.unlabeledAt || e.data.pinnedAt || (e.kind === 'filed' ? e.data.addedAt : 0) || 0;
+  const noLabel = all
+    .filter((e) => !e.folderId)
+    .map((e, i) => [e, i])
+    .sort((a, b) => arrived(b[0]) - arrived(a[0]) || a[1] - b[1])
+    .map(([e]) => e);
   const inbox = folderEl({ id: null, name: 'No Label' }, noLabel);
   root.appendChild(inbox);
   limitInbox(inbox, prevInboxScroll);
@@ -528,7 +535,7 @@ function moveEntry(entry, targetId) {
   } else if (!toFolder) {
     // Out of every folder = back to No Label (kept, from any channel), never lost.
     if (!send({ op: 'moveItem', id: entry.data.id, folderId: null })) return false;
-    state.items = state.items.map((i) => (i.id === entry.data.id ? { ...i, folderId: null } : i));
+    state.items = state.items.map((i) => (i.id === entry.data.id ? { ...i, folderId: null, unlabeledAt: Date.now() } : i));
   } else {
     if (!send({ op: 'moveItem', id: entry.data.id, folderId: toFolder })) return false;
     state.items = state.items.map((i) => (i.id === entry.data.id ? { ...i, folderId: toFolder } : i));

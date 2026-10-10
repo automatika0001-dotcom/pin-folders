@@ -179,7 +179,7 @@ export class Hub extends DurableObject {
         const f = this.getFolder(m.id);
         if (!f) throw new Error('Folder not found');
         // Messages go back to No Label; subfolders move up one level (nothing is lost).
-        this.sql.exec('UPDATE items SET folder_id = NULL WHERE folder_id = ?', m.id);
+        this.backToNoLabel('folder_id = ?', m.id);
         this.sql.exec('UPDATE folders SET parent_id = ? WHERE parent_id = ?', f.parent_id || null, m.id);
         this.sql.exec('DELETE FROM folders WHERE id = ?', m.id);
         return;
@@ -199,7 +199,8 @@ export class Hub extends DurableObject {
           const f = this.getFolder(m.folderId);
           if (!f || f.guild_id !== it.guild_id) throw new Error('Folder not found');
         }
-        this.sql.exec('UPDATE items SET folder_id = ? WHERE id = ?', m.folderId || null, m.id);
+        if (m.folderId) this.sql.exec('UPDATE items SET folder_id = ? WHERE id = ?', m.folderId, m.id);
+        else this.backToNoLabel('id = ?', m.id);
         return;
       }
       case 'removeItem':
@@ -387,6 +388,15 @@ export class Hub extends DurableObject {
       folder.id, folder.guild_id, folder.name, folder.position, folder.created_by, folder.created_at, folder.parent_id
     );
     return folder;
+  }
+
+  // Out of every folder: back to No Label, stamped so it shows at the top there.
+  backToNoLabel(where, arg) {
+    this.sql.exec(
+      `UPDATE items SET folder_id = NULL, data = json_set(data, '$.unlabeledAt', ?) WHERE ${where}`,
+      Date.now(),
+      arg
+    );
   }
 
   // How many folders deep this folder sits (top level = 1).
