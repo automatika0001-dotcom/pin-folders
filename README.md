@@ -26,6 +26,8 @@ pin-folders/
 
 **Gamer mode**: the small switch in the panel's title bar turns on a slow RGB glow. It's a personal setting, remembered per PC.
 
+**Adding the bot to another server**: open a channel in that server in Discord. The panel shows an **Add to this server** button, which opens Discord's own page for adding the bot. Discord only lists servers where you're allowed to add bots (Manage Server).
+
 The bot shows as **offline** in the member list. That's normal: Discord calls it over the web only when someone uses it, which is what lets it run free. Discord itself is never modified; the panel only moves and resizes Discord's window.
 
 ## What it costs

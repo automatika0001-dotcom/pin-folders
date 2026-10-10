@@ -107,6 +107,18 @@ select:focus, input:focus { border-color: var(--accent); }
 .items.capped::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 3px; }
 .folder.nolabel { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--line); border-radius: 0; }
 
+/* ---------- "Add to this server" card ---------- */
+.invite {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--radius);
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  animation: drop-in .25s var(--ease);
+}
+.invite-text { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: 12px; line-height: 1.35; }
+.invite-text b { color: var(--text-strong); font-weight: 600; overflow-wrap: anywhere; }
+.invite-text small { color: var(--muted); font-size: 11px; }
+.primary.small { padding: 6px 10px; font-size: 12px; white-space: nowrap; flex: none; }
+.empty-state .invite-btn { margin-top: 2px; }
+
 /* ---------- folders inside folders ---------- */
 .folder-head .ficon { width: 14px; height: 14px; flex: none; fill: currentColor; stroke: none; opacity: .55; margin-left: -2px; }
 .subfolders { margin: 0 0 4px 9px; padding-left: 6px; border-left: 1px solid var(--line-strong); display: grid; gap: 2px; }

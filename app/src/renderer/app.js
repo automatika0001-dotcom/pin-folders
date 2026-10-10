@@ -101,11 +101,17 @@ function refreshView(force = false) {
 function onChannelView(m) {
   if (m.reqId !== viewReq) return; // an older answer
   if (!m.ok) {
-    view = { status: m.reason === 'no-match' ? 'nomatch' : 'error', reason: m.reason, pins: [], guildId: null, channelId: null, channelName: null };
+    const status = m.reason === 'no-match' ? 'nomatch' : m.reason === 'no-channel' ? 'nochannel' : 'error';
+    view = { status, reason: m.reason, pins: [], guildId: m.guildId || null, channelId: null, channelName: null };
+    if (status === 'nochannel' && channelMode === 'auto' && m.guildId && m.guildId !== guildId) setGuild(m.guildId, false);
     renderChannelPicker();
     return render();
   }
   view = { status: 'ok', guildId: m.guildId, channelId: m.channelId, channelName: m.channelName, pins: m.pins || [], reason: '' };
+  if (inviteChecks.length) {
+    inviteChecks.forEach(clearTimeout);
+    inviteChecks = [];
+  }
   // Follow Discord into whichever server it's showing.
   if (channelMode === 'auto' && m.guildId !== guildId) setGuild(m.guildId, false);
   renderChannelPicker();
@@ -178,12 +184,17 @@ function render() {
     return;
   }
   renderGuilds();
+  updateInvite();
   const root = $('#folders');
   const scroll = root.scrollTop;
   root.innerHTML = '';
 
   if (!state.guilds.length) {
-    root.innerHTML = `<div class="empty-state"><strong>No servers yet</strong>Invite the Pin Folders bot to your Discord server to get started.</div>`;
+    root.innerHTML = `<div class="empty-state"><strong>No servers yet</strong>Add the Pin Folders bot to your Discord server to get started.${
+      state.invite ? '<br><br><button class="primary invite-btn">Add to this server</button>' : ''
+    }</div>`;
+    root.querySelector('.invite-btn')?.addEventListener('click', inviteBot);
+    updateInvite();
     return;
   }
 
@@ -249,6 +260,46 @@ function limitInbox(folder, restoreScroll = 0) {
     $('#folders').dataset.inboxScroll = String(list.scrollTop);
   });
 }
+
+// ---------- "Add to this server" ----------
+/** Server name from Discord's window title ("#general | My Server - Discord"), or null if not a server channel. */
+function titleServerName(title) {
+  const t = String(title || '').replace(/\s+-\s+Discord\s*$/i, '').replace(/^Discord\s+[|\-]\s+/i, '').trim();
+  if (!t) return null;
+  const parts = t.split(/\s+\|\s+/);
+  if (parts.length < 2) return null; // DMs, Friends, settings etc.
+  if (!parts.some((p) => p.startsWith('#') || /^[^@\s]/.test(p))) return null;
+  const name = parts[parts.length - 1].trim();
+  return name && !name.startsWith('#') && !name.startsWith('@') ? name : null;
+}
+
+function updateInvite() {
+  const box = $('#invite');
+  const server = channelMode === 'auto' && view.status === 'nomatch' ? titleServerName(discordTitle) : null;
+  const show = !!state.invite && !!server && ws && ws.readyState === 1;
+  box.classList.toggle('hidden', !show);
+  if (show) $('#invite-server').textContent = server;
+}
+
+let inviteChecks = [];
+function inviteBot() {
+  if (!state.invite) return toast('Not connected to the server yet');
+  pf.openExternal(state.invite);
+  // Once they've added it, pick the server up quickly instead of waiting 10 minutes.
+  inviteChecks.forEach(clearTimeout);
+  inviteChecks = [8, 20, 40, 75, 120, 180].map((sec) =>
+    setTimeout(() => {
+      if (ws && ws.readyState === 1) ws.send('{"op":"refreshGuilds"}');
+      refreshView(true);
+    }, sec * 1000)
+  );
+}
+window.addEventListener('focus', () => {
+  if (inviteChecks.length && ws && ws.readyState === 1) {
+    ws.send('{"op":"refreshGuilds"}');
+    setTimeout(() => refreshView(true), 1500);
+  }
+});
 
 // ---------- folder tree helpers ----------
 const MAX_DEPTH = 5;
@@ -382,6 +433,10 @@ function emptyText(isNoLabel) {
   if (view.status === 'loading') return '<div class="skeleton"></div><div class="skeleton"></div>';
   if (view.status === 'ok' && view.guildId === guildId) return `<div class="empty-folder">Every pin in #${esc(view.channelName)} is in a folder.</div>`;
   if (view.status === 'error') return `<div class="empty-folder">Couldn't load pins: ${esc(view.reason)}</div>`;
+  if (view.status === 'nochannel')
+    return '<div class="empty-folder">The bot can\'t see this channel. Give it <b>View Channel</b> and <b>Read Message History</b> here to see its pins.</div>';
+  if (view.status === 'nomatch' && titleServerName(discordTitle))
+    return '<div class="empty-folder">This server doesn\'t have the Pin Folders bot yet. Use <b>Add to this server</b> above.</div>';
   return '<div class="empty-folder">Open a text channel in Discord (or pick one under "Pins from") to see its unsorted pins here.</div>';
 }
 
@@ -925,6 +980,7 @@ $('#btn-min').onclick = () => pf.minimize();
 $('#btn-close').onclick = () => pf.close();
 $('#btn-snap').onclick = () => pf.snap();
 $('#btn-new').onclick = () => newFolder();
+$('#btn-invite').onclick = inviteBot;
 
 // Gamer mode: a slow RGB glow through the UI. Personal setting, remembered on this PC.
 function setGamer(on) {

@@ -38,6 +38,13 @@
       <select id="guild" title="Server"></select>
       <span id="status" class="status" title="Connection to the shared server"><i></i><b>Connecting</b></span>
     </div>
+    <div id="invite" class="invite hidden">
+      <div class="invite-text">
+        <b>Pin Folders isn't in <span id="invite-server">this server</span> yet.</b>
+        <small>Discord only lets you pick servers where you're allowed to add bots.</small>
+      </div>
+      <button id="btn-invite" class="primary small">Add to this server</button>
+    </div>
     <label class="channel-row" title="Which channel's pins appear under No Label">
       <span class="channel-label">Pins from</span>
       <select id="channel"><option value="auto">Follow Discord</option></select>

@@ -99,7 +99,21 @@ export class Hub extends DurableObject {
       .toArray()
       .filter((i) => ids.has(i.guild_id))
       .map((i) => ({ ...JSON.parse(i.data), id: i.id, guildId: i.guild_id, folderId: i.folder_id }));
-    return { type: 'state', guilds, folders, items };
+    return { type: 'state', guilds, folders, items, invite: this.inviteUrl() };
+  }
+
+  // Link that adds the bot to a server. Discord's page only lists servers where
+  // the person is allowed to add bots (Manage Server), so it enforces that itself.
+  inviteUrl() {
+    const id = this.env.DISCORD_APPLICATION_ID;
+    if (!id) return null;
+    const qs = new URLSearchParams({
+      client_id: id,
+      scope: 'bot applications.commands',
+      permissions: String(1024 + 65536), // View Channels + Read Message History
+      integration_type: '0',
+    });
+    return `https://discord.com/oauth2/authorize?${qs}`;
   }
 
   // Servers the bot is in (cached; refreshed from Discord every 10 minutes).
@@ -191,6 +205,16 @@ export class Hub extends DurableObject {
       case 'removeItem':
         this.sql.exec('DELETE FROM items WHERE id = ?', m.id);
         return;
+      // A panel just sent someone to add the bot: re-check the server list now
+      // instead of waiting for the 10-minute refresh.
+      case 'refreshGuilds': {
+        if (Date.now() - (this.lastForcedGuilds || 0) < 5000) return { quiet: true };
+        this.lastForcedGuilds = Date.now();
+        const before = new Set((await this.guilds()).map((g) => g.id));
+        const after = await this.guilds(true);
+        const changed = after.length !== before.size || after.some((g) => !before.has(g.id));
+        return changed ? undefined : { quiet: true };
+      }
       // Re-send the current state to one panel (after a refused change).
       case 'sync':
         return { quiet: true, reply: await this.snapshot() };
@@ -237,6 +261,10 @@ export class Hub extends DurableObject {
     if (!t) return null;
     const guilds = [...(await this.guilds())].sort((a, b) => b.name.length - a.name.length);
     const named = guilds.find((g) => t.includes(g.name.toLowerCase()));
+    // Titles look like "#channel | Server Name - Discord". If a server name is there
+    // and it isn't one the bot is in, don't guess: it's a server without the bot.
+    const parts = t.replace(/\s+-\s+discord\s*$/, '').split(/\s+\|\s+/);
+    if (!named && parts.length >= 2 && !parts[parts.length - 1].startsWith('#')) return null;
     const candidates = named ? [named] : guilds.slice(0, 10);
     const segments = t.split(/\s+[|\-\u2013\u2014]\s+/).map((x) => x.trim().replace(/^#/, ''));
     for (const g of candidates) {
@@ -247,6 +275,8 @@ export class Hub extends DurableObject {
       const ch = byHash || chans.find((c) => segments.includes(c.name.toLowerCase()));
       if (ch) return { guildId: g.id, channel: ch };
     }
+    // The server has the bot, but this channel isn't one it can see.
+    if (named) return { guildId: named.id, channel: null };
     return null;
   }
 
@@ -263,6 +293,7 @@ export class Hub extends DurableObject {
         target = await this.resolveTitle(m.title);
       }
       if (!target) return { ...base, ok: false, reason: 'no-match' };
+      if (!target.channel) return { ...base, ok: false, reason: 'no-channel', guildId: target.guildId };
       const pins = await this.pinsFor(target.guildId, target.channel, !!m.force);
       return { ...base, ok: true, guildId: target.guildId, channelId: target.channel.id, channelName: target.channel.name, pins };
     } catch (e) {
